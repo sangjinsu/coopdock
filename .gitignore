@@ -1,0 +1,10 @@
+work/
+.superpowers/
+.gstack/
+.remember/
+.DS_Store
+outputs/server/bin/
+outputs/server/.cache/
+outputs/server/go-build/
+outputs/server/go-mod/
+outputs/server/tmp/
