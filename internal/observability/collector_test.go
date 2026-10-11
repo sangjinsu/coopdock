@@ -11,9 +11,9 @@ import (
 )
 
 func TestCollectorInitialCache(t *testing.T) {
-	cfg := DefaultConfig()
-	at := time.Now()
-	cfg.now = func() time.Time { return at }
+	clock := newManualClock()
+	cfg := clock.config()
+	at := clock.now()
 	var samples, reads atomic.Int32
 	cfg.sampleRuntime = func() (uint64, int) { samples.Add(1); return 2048, 3 }
 	match := "match-1"

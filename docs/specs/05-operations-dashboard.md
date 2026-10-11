@@ -26,7 +26,7 @@ admin 미설정에도 actor의 1초 summary heartbeat는 유지한다. collector
 
 `updated_at`은 UTC RFC3339의 **게시 시각**이다. status/rooms envelope는 collector cache, room row는 actor summary 시각이다. HTTP 응답 시각이나 게임 snapshot 생성 시각이 아니다. `started_at`은 instance 시작 시각, `generation`은 cache 세대다. `age_ms >= 5000`이면 stale이며 HTTP와 UI의 임계값은 고정 5초다. UI는 수신 후 monotonic 경과시간을 더하므로 수동 mode에서도 age가 진행한다. envelope가 최신이어도 개별 row는 오래될 수 있다.
 
-polling은 두 API batch 완료 후 5초, batch timeout은 5초다. 한 batch만 진행하며 hidden tab·auto off·pagehide에서 취소한다. persisted pageshow 복귀는 lifecycle/age 표시를 복구하고 visible·auto on·인증 유효 조건에서만 조회한다. 일반 최초 pageshow는 조회를 추가하지 않는다. 실제 BFCache 사용 여부는 browser가 결정한다.
+polling은 두 API batch 완료 후 5초, batch timeout은 5초다. 한 batch만 진행한다. 자동 갱신 해제는 다음 자동 조회를 중단하고 진행 중 조회는 완료하며, hidden tab·pagehide는 진행 중 요청도 취소한다. persisted pageshow 복귀는 lifecycle/age 표시를 복구하고 visible·auto on·인증 유효 조건에서만 조회한다. 일반 최초 pageshow는 조회를 추가하지 않는다. 실제 BFCache 사용 여부는 browser가 결정한다.
 
 일반 오류는 API별 마지막 성공 자료·조건·시각을 유지하면서 오류를 알린다. 최초 실패의 `—`와 성공한 0은 다르다. 401/403은 자료를 지우고 polling을 멈춘다. 재인증은 reload이며 native Basic 자격증명 cache를 지우거나 logout을 보장하지 않는다. 서버 종료 뒤 polling 실패는 종료에 따른 단절일 수 있다.
 

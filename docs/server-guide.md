@@ -51,7 +51,7 @@ Basic 자격증명은 browser가 native cache에 보관할 수 있어 앱이 log
 
 room actor summary·background collector·runtime sampler는 각각 1초 주기입니다. HTTP는 cache만 읽으며 actor/manager lock·callback·runtime sampling을 실행하지 않습니다. actor summary 게시에는 게임 `snapshot()`을 재사용하지 않으며 revision·snapshot_seq를 증가시키지 않습니다. admin이 꺼져도 actor의 1초 summary heartbeat는 유지합니다. collector/runtime loop는 0개지만 이 고정 게시 비용은 남으며 최대 룸 수는 `ROOM_MAX_ROOMS`로 제한합니다. 게시·runtime sampling의 실제 게임 부하 영향은 미측정입니다.
 
-자동 갱신은 두 API 조회 batch **완료 후 5초**, batch timeout은 5초입니다. 겹치는 조회를 만들지 않고 hidden tab·자동 갱신 해제·pagehide에서 취소합니다. BFCache의 persisted pageshow 복귀에서는 표시 age와 lifecycle을 복구하며 visible·auto on·인증 유효 조건에서만 다시 조회합니다. 일반 초기 pageshow는 조회를 중복하지 않습니다. BFCache 적격성은 browser가 결정합니다.
+자동 갱신은 두 API 조회 batch **완료 후 5초**, batch timeout은 5초입니다. 겹치는 조회를 만들지 않습니다. 자동 갱신 해제는 다음 자동 조회를 중단하고 진행 중 조회는 완료하며, hidden tab·pagehide는 진행 중 요청도 취소합니다. BFCache의 persisted pageshow 복귀에서는 표시 age와 lifecycle을 복구하며 visible·auto on·인증 유효 조건에서만 다시 조회합니다. 일반 초기 pageshow는 조회를 중복하지 않습니다. BFCache 적격성은 browser가 결정합니다.
 
 `updated_at`은 응답 생성 시각이 아닙니다. status와 rooms envelope에서는 cache 게시 시각, 각 row에서는 actor summary 게시 시각이며 UTC RFC3339 문자열입니다. `started_at`은 서버 instance 시작 시각, `uptime_seconds`는 경과시간입니다. `generation`은 cache 게시 세대이며 게임 revision이 아닙니다. HTTP가 계산한 `age_ms`가 5000 이상이면 `stale=true`입니다. UI는 수신 뒤 monotonic 경과시간을 더해 표시하므로 수동 mode에서도 오래된 자료를 최신으로 고정하지 않습니다. cache가 최신이어도 개별 actor row는 stale일 수 있습니다.
 

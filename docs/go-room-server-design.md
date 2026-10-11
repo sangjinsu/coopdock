@@ -361,7 +361,7 @@ HTTP handler 반환 시 취소되는 `r.Context()`를 WebSocket 수명의 기준
 
 actor summary·collector·runtime sampler는 각각 1초, UI polling은 batch 완료 후 5초와 batch timeout 5초, stale는 고정 `age_ms >= 5000`이다. actor는 atomic allowlist summary를 게시하고 collector는 registry refs/ready·transport live count·독립 runtime 자료를 모아 불변 cache를 만든다. HTTP는 cache만 읽어 actor/manager lock·callback·runtime sampling을 하지 않는다. 게임 snapshot 재사용과 revision/snapshot_seq 증가는 없다.
 
-admin이 꺼져도 actor의 1초 summary heartbeat는 유지한다. collector/runtime loop는 0개며 최대 룸은 `ROOM_MAX_ROOMS`로 제한한다. 이 고정 비용과 runtime sampling의 게임 부하 영향은 미측정이다. updated_at은 envelope의 cache 게시 시각, row의 actor 게시 시각으로 응답 시각과 다르다. generation은 cache 세대다. UI는 수신 후 monotonic age를 더해 수동 mode도 오래됨을 표시하며 일반 오류는 마지막 자료·조건·시각을 유지한다. 인증 실패는 자료 삭제와 polling 중단이다. hidden/auto-off/pagehide는 취소하고 persisted pageshow는 조건부 복귀한다.
+admin이 꺼져도 actor의 1초 summary heartbeat는 유지한다. collector/runtime loop는 0개며 최대 룸은 `ROOM_MAX_ROOMS`로 제한한다. 이 고정 비용과 runtime sampling의 게임 부하 영향은 미측정이다. updated_at은 envelope의 cache 게시 시각, row의 actor 게시 시각으로 응답 시각과 다르다. generation은 cache 세대다. UI는 수신 후 monotonic age를 더해 수동 mode도 오래됨을 표시하며 일반 오류는 마지막 자료·조건·시각을 유지한다. 인증 실패는 자료 삭제와 polling 중단이다. 자동 갱신 해제는 다음 자동 조회를 중단하고 진행 중 조회는 완료하며, hidden/pagehide는 진행 중 요청도 취소하고 persisted pageshow는 조건부 복귀한다.
 
 운영 summary/cache/API/HTML/로그에는 password·hash·salt·운영 token·전체 member ID 목록·game_state를 넣지 않는다. 게임 room.list는 public-only, 운영 목록은 private도 포함한다. CPU·RTT·클라이언트 표시지연은 API null/화면 미측정이며 heap은 HeapAlloc이다. 정확한 DTO·query·timestamp는 [04](specs/04-messages-and-api.md#현재-운영-json-계약)에 있다.
 
@@ -380,7 +380,7 @@ admin이 꺼져도 actor의 1초 summary heartbeat는 유지한다. collector/ru
 
 운영 HTTPS는 기존 reverse proxy를 통해 제공하며 이번 구현은 TLS·배포 변경을 포함하지 않는다. [운영 가이드](server-guide.md#운영-대시보드-켜기)의 조용한 token 입력을 사용한다. browser native Basic cache 때문에 앱 logout·재인증 reload가 credential 삭제를 보장하지 않는다. 계정 관리·operator·JWT/session/OIDC는 후속이다.
 
-후속 API는 GET `/admin/api/rooms/{id}`, GET `/admin/api/commands/{command_id}`, POST kick/close/drain이다. 아래 sequence와 9절은 **후속 설계**이며 현재 command/audit/lane 구현 또는202 응답을 뜻하지 않는다. 향후 변경 요청의 서버 권한·CSRF/Origin 검증과 실제 결과 계약은 별도로 구현한다. 운영 대상은 재사용되는 번호가 아닌 내부 room_id다.
+후속 API는 GET `/admin/api/rooms/{id}`, GET `/admin/api/commands/{command_id}`, POST kick/close/drain이다. 아래 sequence는 **현재 조회 경로**이며 9절은 **후속 설계**로 현재 command/audit/lane 구현 또는202 응답을 뜻하지 않는다. 향후 변경 요청의 서버 권한·CSRF/Origin 검증과 실제 결과 계약은 별도로 구현한다. 운영 대상은 재사용되는 번호가 아닌 내부 room_id다.
 
 ```mermaid
 sequenceDiagram

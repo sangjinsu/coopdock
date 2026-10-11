@@ -88,7 +88,7 @@ Hz는 초당 횟수다. TTL은 기록 보관 시간, stale은 오래된 요약 �
 | 실패 시도 제한 | IP/session/room별 횟수·TTL 제안, 구체값 미측정 | 신뢰 proxy의 IP 정책, 재접속 우회·정상 참가자 영향; RATE_LIMITED 반환 |
 | 계산 / 전송 빈도 | 기본 ROOM_TICK_HZ=30, ROOM_SNAPSHOT_HZ=15 | tick 1~120, snapshot 1~TickHz; 실제 완료 빈도·도착 지연 미측정 |
 | 게임 입력 queue / tick budget | ROOM_INPUT_QUEUE=256, ROOM_INPUTS_PER_TICK=64 | queue 1~4096, budget 1~InputQueue; inbox+pending 합계 credit |
-| 운영 조회 간격 | batch 완료 후 5초, batch timeout 5초; actor/collector/runtime 각각 1초 | hidden/auto-off 취소, persisted 복귀 복구; 부하 영향 미측정 |
+| 운영 조회 간격 | batch 완료 후 5초, batch timeout 5초; actor/collector/runtime 각각 1초 | 자동 갱신 해제는 다음 자동 조회 중단·진행 중 조회 완료, hidden/pagehide는 진행 중 요청도 취소, persisted 복귀 복구; 부하 영향 미측정 |
 | 운영 인증 | ADMIN_VIEWER_TOKEN 미설정/빈값이면 비활성404 | 설정 시32~256 bytes·ASCII 0x21..0x7e, username viewer |
 | 총 룸·접속 한계 | 구현 후 실측으로 결정 | 실행 장비와 실제 GameHandler 기준 |
 | 입력·중요 송신·운영 큐 | 유한 크기; 숫자는 실측 후 결정 | 포화 시 오류·거절·느린 연결 정리 검증 |
@@ -98,7 +98,7 @@ Hz는 초당 횟수다. TTL은 기록 보관 시간, stale은 오래된 요약 �
 | command 저장·TTL·로그 rotation | 초기 보관 정책 제안 | 재시도 기간·audit 용량·운영 규모 |
 | drain(새 수용 차단 후 종료)·연결/actor 대기·audit flush(남은 기록 저장) | 종료 시간 상한 설정 | 진행 게임 유지와 종료 시험 |
 
-tick은 고정 dt 한 단계이며 놓친 ticker 신호를 catch-up하지 않는다. 부하로 simulation 시간이 wall time보다 늦어질 수 있다. 환경변수는 빈 문자열·0·음수·범위 초과·snapshot>tick·budget>queue를 시작 시 거절한다.
+tick은 고정 dt 한 단계이며 놓친 ticker 신호를 catch-up하지 않는다. 부하로 simulation 시간이 wall time보다 늦어질 수 있다. 숫자·기간 환경변수의 빈 문자열·0·음수·범위 초과와 snapshot>tick·budget>queue, 주소·Origin 설정의 빈값·잘못된 형식은 시작 시 거절하며, `ADMIN_VIEWER_TOKEN`의 빈 문자열은 정상적인 운영 비활성 설정이다.
 
 CPU 사용량이나 동시 룸 수의 실측 결과는 없다. 임의의 수용 규모를 기본 보장으로 삼지 않는다.
 [OWASP 저장 지침](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)의 Argon2id·고유 salt를 참고한다. hash 파라미터와 worker 수가 게임 tick에 미치는 영향은 별도로 측정한다.
