@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"roomserver/internal/room"
 	"strconv"
 	"unicode/utf8"
@@ -16,6 +17,7 @@ type Request struct {
 	ID     *string
 	Create room.CreateOptions
 	Join   room.JoinOptions
+	Input  room.Input
 }
 type Error struct {
 	Code    string `json:"code"`
@@ -130,7 +132,32 @@ func Decode(data []byte) (Request, error) {
 		if e != nil {
 			return r, invalid
 		}
-	case "room.list", "room.leave":
+	case "game.action":
+		if len(p) != 3 || !keys(p, "match_id", "input_seq", "action") {
+			return r, invalid
+		}
+		if isNull(p["match_id"]) || json.Unmarshal(p["match_id"], &r.Input.MatchID) != nil || r.Input.MatchID == "" {
+			return r, invalid
+		}
+		seq := p["input_seq"]
+		if isNull(seq) || json.Unmarshal(seq, &r.Input.InputSeq) != nil || r.Input.InputSeq == 0 || r.Input.InputSeq > room.MaxInputSeq {
+			return r, invalid
+		}
+		a, err := object(p["action"])
+		if err != nil || len(a) != 2 || !keys(a, "type", "direction") || isNull(a["type"]) || json.Unmarshal(a["type"], &r.Input.Action.Type) != nil || r.Input.Action.Type != "move" {
+			return r, invalid
+		}
+		direction, err := object(a["direction"])
+		if err != nil || len(direction) != 3 || !keys(direction, "x", "y", "z") {
+			return r, invalid
+		}
+		for key, target := range map[string]*float64{"x": &r.Input.Action.Direction.X, "y": &r.Input.Action.Direction.Y, "z": &r.Input.Action.Direction.Z} {
+			v := direction[key]
+			if isNull(v) || json.Unmarshal(v, target) != nil || math.IsNaN(*target) || math.IsInf(*target, 0) || *target < -1 || *target > 1 {
+				return r, invalid
+			}
+		}
+	case "room.list", "room.leave", "room.start":
 		if len(p) != 0 {
 			return r, invalid
 		}

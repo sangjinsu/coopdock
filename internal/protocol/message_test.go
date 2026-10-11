@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -28,7 +29,7 @@ func TestDecodeStrict(t *testing.T) {
 	for _, p := range []string{`{}`, `{"room_number":123456}`, `{"room_number":"１２３４５６"}`, `{"room_number":"12345"}`, `{"room_number":"1234567"}`, `{"room_number":"123456","password":null}`} {
 		invalid = append(invalid, fmt.Sprintf(`{"version":1,"op":"room.join","request_id":"a","payload":%s,"error":null}`, p))
 	}
-	for _, op := range []string{"room.start", "game.action", "admin.drain", "session.guest"} {
+	for _, op := range []string{"room.unknown", "game.action", "admin.drain", "session.guest"} {
 		invalid = append(invalid, fmt.Sprintf(`{"version":1,"op":%q,"request_id":"a","payload":{},"error":null}`, op))
 	}
 	invalid = append(invalid, string(append([]byte(valid[:20]), 0xff)))
@@ -93,6 +94,51 @@ func TestValidUnicodeEscapesPreserveValues(t *testing.T) {
 					t.Fatal("valid string changed")
 				}
 			})
+		}
+	}
+}
+
+// Removing any required numeric or exact-key validation must fail this table.
+func TestDecodeMovementStrict(t *testing.T) {
+	valid := `{"version":1,"op":"game.action","request_id":"a","payload":{"match_id":"m","input_seq":1,"action":{"type":"move","direction":{"x":1,"y":0,"z":0}}},"error":null}`
+	if _, err := Decode([]byte(valid)); err != nil {
+		t.Fatal(err)
+	}
+	for _, pair := range [][2]string{
+		{`"z":0`, `"z":null`}, {`"z":0`, `"q":0`}, {`"z":0`, `"z":1e400`}, {`"y":0`, `"y":1e400`},
+		{`"x":1`, `"x":1e400`}, {`"x":1`, `"x":1.1`}, {`"x":1`, `"x":-1.1`}, {`"x":1`, `"x":"1"`},
+		{`"x":1`, `"x":1,"x":0`}, {`"x":1,`, ``}, {`,"y":0`, ``}, {`,"z":0`, ``},
+		{`"direction":{"x":1,"y":0,"z":0}`, `"direction":null`},
+		{`"direction":{"x":1,"y":0,"z":0}`, `"direction":[]`},
+		{`"type":"move",`, ``}, {`"type":"move"`, `"type":null`}, {`"type":"move"`, `"type":"stop"`},
+		{`"action":`, `"dt":0,"action":`}, {`"type":"move"`, `"type":"move","position":{}`},
+		{`"input_seq":1`, `"input_seq":9007199254740992`}, {`"input_seq":1`, `"input_seq":1.5`},
+		{`"input_seq":1`, `"input_seq":null`}, {`"input_seq":1`, `"input_seq":0`},
+		{`"input_seq":1`, `"input_seq":-1`}, {`"input_seq":1`, `"input_seq":1e0`},
+		{`"input_seq":1`, `"input_seq":"1"`}, {`"input_seq":1,`, ``},
+		{`"match_id":"m",`, ``}, {`"match_id":"m"`, `"match_id":null`}, {`"match_id":"m"`, `"match_id":""`},
+		{`"request_id":"a"`, `"request_id":null`}, {`"request_id":"a"`, `"request_id":""`},
+		{`"action":{"type":"move","direction":{"x":1,"y":0,"z":0}}`, `"action":null`},
+	} {
+		bad := strings.Replace(valid, pair[0], pair[1], 1)
+		t.Run(bad, func(t *testing.T) {
+			if _, err := Decode([]byte(bad)); err == nil {
+				t.Fatalf("accepted %s", bad)
+			}
+		})
+	}
+	for _, seq := range []string{"1", "9007199254740991"} {
+		if _, err := Decode([]byte(strings.Replace(valid, `"input_seq":1`, `"input_seq":`+seq, 1))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := `{"version":1,"op":"room.start","request_id":"a","payload":{},"error":null}`
+	if _, err := Decode([]byte(start)); err != nil {
+		t.Fatal(err)
+	}
+	for _, payload := range []string{`null`, `{"extra":1}`, `[]`} {
+		if _, err := Decode([]byte(strings.Replace(start, `"payload":{}`, `"payload":`+payload, 1))); err == nil {
+			t.Fatal("invalid start accepted")
 		}
 	}
 }

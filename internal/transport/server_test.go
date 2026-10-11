@@ -293,7 +293,7 @@ func TestHTTPOriginStrictFramesAndShutdown(t *testing.T) {
 		t.Fatal("foreign origin accepted")
 	}
 	g := dial()
-	for _, b := range []string{`{`, `{"version":1,"op":"room.create","request_id":"a","payload":{"capacity":0},"error":null}`, `{"version":1,"op":"room.start","request_id":"a","payload":{},"error":null}`} {
+	for _, b := range []string{`{`, `{"version":1,"op":"room.create","request_id":"a","payload":{"capacity":0},"error":null}`, `{"version":1,"op":"room.unknown","request_id":"a","payload":{},"error":null}`} {
 		if e = g.c.Write(context.Background(), websocket.MessageText, []byte(b)); e != nil {
 			t.Fatal(e)
 		}

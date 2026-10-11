@@ -111,7 +111,7 @@ func (s *Server) accept(w http.ResponseWriter, r *http.Request) {
 	}
 	c.SetReadLimit(s.cfg.MessageLimit)
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &peer{server: s, conn: c, session: session, ctx: ctx, cancel: cancel, ingress: make(chan incoming, s.cfg.IngressQueue), outbound: make(chan protocol.Envelope, s.cfg.OutboundQueue)}
+	p := &peer{server: s, conn: c, session: session, ctx: ctx, cancel: cancel, ingress: make(chan incoming, s.cfg.IngressQueue), outbound: newOutbox(s.cfg.OutboundQueue)}
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
@@ -165,32 +165,35 @@ type incoming struct {
 	data []byte
 }
 type peer struct {
-	server      *Server
-	conn        *websocket.Conn
-	session     *room.Session
-	ctx         context.Context
-	cancel      context.CancelFunc
-	stopOnce    sync.Once
-	ingress     chan incoming
-	outbound    chan protocol.Envelope
-	roomID      string
-	minRevision uint64
+	server          *Server
+	conn            *websocket.Conn
+	session         *room.Session
+	ctx             context.Context
+	cancel          context.CancelFunc
+	stopOnce        sync.Once
+	ingress         chan incoming
+	outbound        *outbox
+	roomID          string
+	minRevision     uint64
+	membershipToken uint64
+	activeMatch     string
+	snapshotSeq     uint64
+	startToken      uint64
+	startMatch      string
+	startRevision   uint64
 }
 
-func (p *peer) stop() { p.stopOnce.Do(func() { p.cancel(); p.conn.CloseNow() }) }
-func (p *peer) enqueue(v protocol.Envelope) bool {
-	select {
-	case <-p.ctx.Done():
+func (p *peer) stop()                            { p.stopOnce.Do(func() { p.cancel(); p.conn.CloseNow() }) }
+func (p *peer) enqueue(v protocol.Envelope) bool { return p.enqueueBatch(false, v) }
+func (p *peer) enqueueBatch(clearLatest bool, messages ...protocol.Envelope) bool {
+	if p.ctx.Err() != nil {
 		return false
-	default:
 	}
-	select {
-	case p.outbound <- v:
-		return true
-	default:
+	if !p.outbound.reliable(clearLatest, messages...) {
 		p.stop()
 		return false
 	}
+	return true
 }
 func (p *peer) run() {
 	var workers sync.WaitGroup
@@ -228,35 +231,122 @@ func (p *peer) reader() {
 func (p *peer) writer() {
 	defer p.stop()
 	for {
-		select {
-		case <-p.ctx.Done():
+		v, epoch, ok := p.outbound.next(p.ctx)
+		if !ok {
 			return
-		case v := <-p.outbound:
-			p.server.mu.Lock()
-			hook := p.server.beforeWrite
-			p.server.mu.Unlock()
-			if hook != nil {
-				hook(p.ctx, v)
-			}
-			if p.ctx.Err() != nil {
-				return
-			}
-			b, e := json.Marshal(v)
-			if e != nil {
-				return
-			}
-			ctx, cancel := context.WithTimeout(p.ctx, p.server.cfg.WriteTimeout)
-			e = p.conn.Write(ctx, websocket.MessageText, b)
+		}
+		p.server.mu.Lock()
+		hook := p.server.beforeWrite
+		p.server.mu.Unlock()
+		if hook != nil {
+			hook(p.ctx, v)
+		}
+		if p.ctx.Err() != nil {
+			return
+		}
+		b, e := json.Marshal(v)
+		if e != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(p.ctx, p.server.cfg.WriteTimeout)
+		if epoch != 0 && !p.outbound.beginSnapshotWrite(epoch) {
 			cancel()
-			if e != nil {
-				return
-			}
+			continue
+		}
+		e = p.conn.Write(ctx, websocket.MessageText, b)
+		cancel()
+		if e != nil {
+			return
 		}
 	}
 }
+
+func (p *peer) setMembership(state room.Snapshot) {
+	p.roomID, p.membershipToken = p.session.Membership()
+	p.minRevision = state.Revision
+	p.snapshotSeq = state.SnapshotSeq
+	p.activeMatch = ""
+	if state.MatchID != nil {
+		p.activeMatch = *state.MatchID
+	}
+}
+func (p *peer) rememberStart(state room.Snapshot) {
+	p.startToken = p.membershipToken
+	p.startMatch = *state.MatchID
+	p.startRevision = state.Revision
+	p.activeMatch = *state.MatchID
+	p.minRevision = state.Revision
+	p.snapshotSeq = state.SnapshotSeq
+}
+func (p *peer) currentEvent(event room.Event) bool {
+	id, token := p.session.Membership()
+	return p.roomID != "" && id == p.roomID && token == p.membershipToken && event.MembershipToken == token
+}
+func (p *peer) processEvent(event room.Event) bool {
+	// Completions retain request correlation after leave or a match transition.
+	if event.Op == "game.action" && event.RequestID != "" {
+		id := event.RequestID
+		return p.enqueue(protocol.Response(protocol.Request{Op: event.Op, ID: &id}, event.Ack, event.Err))
+	}
+	if !p.currentEvent(event) {
+		return true
+	}
+	state := event.Snapshot
+	switch event.Op {
+	case "room.state":
+		if state.RoomID == p.roomID && state.Revision > p.minRevision {
+			p.minRevision = state.Revision
+			return p.enqueue(protocol.Event("room.state", state))
+		}
+	case "game.started":
+		if state.RoomID != p.roomID || state.MatchID == nil {
+			return true
+		}
+		// Lifecycle freshness is independent of ordinary room metadata revisions.
+		if event.MembershipToken == p.startToken &&
+			(state.Revision < p.startRevision || (state.Revision == p.startRevision && *state.MatchID == p.startMatch)) {
+			return true
+		}
+		p.rememberStart(state)
+		return p.enqueueBatch(true, protocol.Event("game.started", state), protocol.Event("room.state", state))
+	case "game.ended":
+		if state.RoomID != p.roomID || event.Ended == nil || event.Ended.MatchID != p.activeMatch {
+			return true
+		}
+		p.activeMatch = ""
+		p.snapshotSeq = state.SnapshotSeq
+		p.minRevision = state.Revision
+		payload := struct {
+			MatchID    string        `json:"match_id"`
+			Reason     string        `json:"reason"`
+			ServerTick uint64        `json:"server_tick"`
+			Snapshot   room.Snapshot `json:"snapshot"`
+		}{event.Ended.MatchID, event.Ended.Reason, event.Ended.ServerTick, state}
+		return p.enqueueBatch(true, protocol.Event("game.ended", payload), protocol.Event("room.state", state))
+	case "game.event":
+		if event.GameEvent != nil && event.GameEvent.MatchID == p.activeMatch {
+			return p.enqueue(protocol.Event("game.event", event.GameEvent))
+		}
+	}
+	return true
+}
+func (p *peer) processSnapshot() {
+	state, ok := p.session.TakeSnapshot()
+	if !ok {
+		return
+	}
+	id, token := p.session.Membership()
+	if id != p.roomID || token != p.membershipToken || state.RoomID != p.roomID || state.MatchID == nil || p.activeMatch == "" || *state.MatchID != p.activeMatch || state.SnapshotSeq <= p.snapshotSeq {
+		return
+	}
+	p.snapshotSeq = state.SnapshotSeq
+	p.outbound.snapshot(protocol.Event("game.snapshot", state))
+}
 func (p *peer) processor() {
 	defer p.stop()
-	p.enqueue(protocol.Event("session.guest", map[string]string{"session_id": p.session.ID()}))
+	if !p.enqueue(protocol.Event("session.guest", map[string]string{"session_id": p.session.ID()})) {
+		return
+	}
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -264,16 +354,11 @@ func (p *peer) processor() {
 		case <-p.session.Done():
 			return
 		case event := <-p.session.Events():
-			if event.Op != "room.state" {
-				continue
+			if !p.processEvent(event) {
+				return
 			}
-			state := event.Snapshot
-			// Ignore stale membership events and the initial snapshot already sent.
-			if state.RoomID == p.roomID && state.Revision > p.minRevision {
-				if !p.enqueue(protocol.Event("room.state", state)) {
-					return
-				}
-			}
+		case <-p.session.SnapshotReady():
+			p.processSnapshot()
 		case in := <-p.ingress:
 			r, e := protocol.Decode(in.data)
 			if e != nil || in.kind != websocket.MessageText {
@@ -293,14 +378,18 @@ func (p *peer) processor() {
 			}
 			ctx, cancel := context.WithTimeout(p.ctx, p.server.cfg.RequestTimeout)
 			var payload any
-			var snapshot room.Snapshot
+			var state room.Snapshot
+			deferred := false
 			switch r.Op {
 			case "room.create":
-				snapshot, e = p.server.manager.Create(ctx, p.session, r.Create)
-				payload = map[string]any{"snapshot": snapshot}
+				state, e = p.server.manager.Create(ctx, p.session, r.Create)
+				payload = map[string]any{"snapshot": state}
 			case "room.join":
-				snapshot, e = p.server.manager.Join(ctx, p.session, r.Join)
-				payload = map[string]any{"snapshot": snapshot}
+				state, e = p.server.manager.Join(ctx, p.session, r.Join)
+				payload = map[string]any{"snapshot": state}
+			case "room.start":
+				state, e = p.server.manager.Start(ctx, p.session)
+				payload = map[string]any{"snapshot": state}
 			case "room.list":
 				var rooms []room.Snapshot
 				rooms, e = p.server.manager.ListPublic(ctx)
@@ -308,7 +397,11 @@ func (p *peer) processor() {
 			case "room.leave":
 				e = p.server.manager.Leave(ctx, p.session)
 				payload = struct{}{}
+			case "game.action":
+				e = p.server.manager.SubmitInput(ctx, p.session, *r.ID, r.Input)
+				deferred = e == nil
 			}
+			// SubmitInput copies the deadline; canceling acceptance does not cancel the receipt.
 			cancel()
 			p.server.mu.Lock()
 			afterRequest := p.server.afterRequest
@@ -319,20 +412,39 @@ func (p *peer) processor() {
 			if p.ctx.Err() != nil {
 				return
 			}
-			if !p.enqueue(protocol.Response(r, payload, e)) {
-				return
+			if deferred {
+				continue
 			}
-			if e == nil {
-				switch r.Op {
-				case "room.create", "room.join":
-					if !p.enqueue(protocol.Event("room.state", snapshot)) {
-						return
-					}
-					p.roomID = snapshot.RoomID
-					p.minRevision = snapshot.Revision
-				case "room.leave":
-					p.roomID = ""
-					p.minRevision = 0
+			response := protocol.Response(r, payload, e)
+			if e != nil {
+				if !p.enqueue(response) {
+					return
+				}
+				continue
+			}
+			switch r.Op {
+			case "room.create", "room.join":
+				p.setMembership(state)
+				if !p.enqueueBatch(true, response, protocol.Event("room.state", state)) {
+					return
+				}
+			case "room.start":
+				p.rememberStart(state)
+				if !p.enqueueBatch(true, response, protocol.Event("game.started", state), protocol.Event("room.state", state)) {
+					return
+				}
+			case "room.leave":
+				p.roomID = ""
+				p.membershipToken = 0
+				p.minRevision = 0
+				p.activeMatch = ""
+				p.snapshotSeq = 0
+				if !p.enqueueBatch(true, response) {
+					return
+				}
+			default:
+				if !p.enqueue(response) {
+					return
 				}
 			}
 		}
