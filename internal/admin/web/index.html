@@ -1,1 +1,57 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>CoopDock 운영 현황</title><link rel="stylesheet" href="/admin/assets/dashboard.css"><script src="/admin/assets/dashboard.js" defer></script></head><body><main><h1>CoopDock 운영 현황</h1><p>인증된 운영 조회 API가 연결되어 있습니다.</p></main></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CoopDock 운영 현황</title>
+  <link rel="stylesheet" href="/admin/assets/dashboard.css">
+  <script src="/admin/assets/dashboard.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">운영 현황으로 이동</a>
+  <header><strong class="brand">CoopDock</strong><span>조회 담당 · 운영 조회</span></header>
+  <main id="main">
+    <h1>운영 현황</h1>
+    <section class="overview" aria-label="서버 상태">
+      <p id="server-status">서버 상태를 불러오는 중입니다.</p>
+      <dl class="metrics">
+        <div><dt>연결</dt><dd id="connections">—</dd></div>
+        <div><dt>룸 참가</dt><dd id="members">—</dd></div>
+        <div><dt>전체 룸</dt><dd id="room-count">—</dd></div>
+        <div><dt>대기</dt><dd id="waiting-count">—</dd></div>
+        <div><dt>게임 중</dt><dd id="playing-count">—</dd></div>
+      </dl>
+      <p id="server-identity" class="secondary"></p>
+      <p id="status-freshness" class="secondary">서버 요약 갱신 시각: —</p>
+    </section>
+    <section class="refresh-bar" aria-label="갱신 설정">
+      <div class="refresh-controls"><label class="checkbox"><input id="auto-refresh" type="checkbox" checked>자동 갱신</label><button id="refresh" type="button">새로고침</button><span id="refresh-state" role="status">첫 조회를 준비합니다.</span></div>
+      <p id="status-error" class="error" role="status"></p>
+    </section>
+    <section aria-labelledby="rooms-title">
+      <div class="section-heading"><h2 id="rooms-title">룸 목록</h2><p id="rooms-count" class="secondary">전체 —개 · 조건에 맞는 룸 —개</p></div>
+      <div class="filters">
+        <div class="number-filter"><label for="room-number">룸 번호 검색</label><input id="room-number" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{0,6}" autocomplete="off" aria-describedby="number-help number-error"><span id="number-help" class="secondary">앞자리로 검색 · 최대 6자리</span></div>
+        <div><label for="phase">상태</label><select id="phase"><option value="all">전체</option><option value="WAITING">대기</option><option value="PLAYING">게임 중</option></select></div>
+        <div><label for="visibility">공개 여부</label><select id="visibility"><option value="all">전체</option><option value="public">공개</option><option value="private">비공개</option></select></div>
+        <button id="clear-filters" type="button">필터 해제</button>
+      </div>
+      <p id="number-error" class="error" role="status"></p>
+      <p id="displayed-query" class="secondary"></p>
+      <div id="room-scroll" tabindex="0" role="region" aria-label="룸 목록 표, 좌우로 이동 가능" aria-describedby="scroll-help">
+        <table><caption>현재 룸 운영 요약 · 룸 번호 오름차순</caption><colgroup><col class="number-col"><col class="visibility-col"><col class="phase-col"><col class="occupancy-col"><col class="id-col"><col class="id-col"><col class="id-col"><col class="time-col"></colgroup>
+          <thead><tr><th scope="col">룸 번호</th><th scope="col">공개 여부</th><th scope="col">상태</th><th scope="col" class="numeric">인원/정원</th><th scope="col">host</th><th scope="col">룸 ID</th><th scope="col">match ID</th><th scope="col">갱신 시각</th></tr></thead>
+          <tbody id="room-rows"></tbody>
+        </table>
+      </div>
+      <p id="rooms-message" role="status">룸 목록을 불러오는 중입니다.</p>
+      <p id="scroll-help" class="secondary">추가 정보는 표를 좌우로 이동하여 확인하세요. ID는 전체 값으로 표시됩니다.</p>
+      <div class="pagination"><p id="page-info">표시 범위 —</p><div><button id="previous" type="button" disabled>이전</button><button id="next" type="button" disabled>다음</button></div></div>
+      <p id="rooms-freshness" class="secondary">룸 목록 갱신 시각: —</p>
+      <p id="rooms-error" class="error" role="status"></p>
+    </section>
+    <footer><p id="runtime-status">실행 시간 — · heap — MiB · goroutine — · CPU 미측정 · RTT 미측정 · 클라이언트 표시지연 미측정</p><p>조회 전용 화면 · 자동 갱신은 조회 완료 5초 후 진행됩니다.</p></footer>
+    <button id="reauthenticate" type="button" hidden>다시 인증</button>
+  </main>
+</body>
+</html>
