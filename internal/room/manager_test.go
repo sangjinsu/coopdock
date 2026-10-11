@@ -320,3 +320,81 @@ func TestForeignSessionAndResourceBounds(t *testing.T) {
 	m.Disconnect(h)
 	create(t, m, g, CreateOptions{})
 }
+
+func TestCanceledCommittedJoinCannotRemoveRejoin(t *testing.T) {
+	cfg := DefaultConfig()
+	var armed atomic.Bool
+	committed, releaseCommit := make(chan struct{}), make(chan struct{})
+	cancelCaptured, releaseCancel := make(chan struct{}), make(chan struct{})
+	cfg.afterCommit = func() {
+		if armed.Load() {
+			close(committed)
+			<-releaseCommit
+		}
+	}
+	cfg.beforeCancelCleanup = func() {
+		if armed.Load() {
+			close(cancelCaptured)
+			<-releaseCancel
+		}
+	}
+	m := setup(t, cfg)
+	t.Cleanup(func() {
+		for _, ch := range []chan struct{}{releaseCommit, releaseCancel} {
+			select {
+			case <-ch:
+			default:
+				close(ch)
+			}
+		}
+	})
+	host := connect(t, m, "host")
+	room := create(t, m, host, CreateOptions{})
+	guest := connect(t, m, "guest")
+	armed.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	old := make(chan error, 1)
+	go func() { _, err := m.Join(ctx, guest, JoinOptions{RoomNumber: room.RoomNumber}); old <- err }()
+	await(t, committed)
+	guest.mu.Lock()
+	oldToken := guest.membershipToken
+	guest.mu.Unlock()
+	cancel()
+	await(t, cancelCaptured)
+	armed.Store(false)
+	close(releaseCommit)
+	if err := m.Leave(context.Background(), guest); err != nil {
+		t.Fatal(err)
+	}
+	joined, err := m.Join(context.Background(), guest, JoinOptions{RoomNumber: room.RoomNumber})
+	if err != nil || len(joined.Members) != 2 || joined.HostID != host.ID() {
+		t.Fatalf("rejoin failed: %+v %v", joined, err)
+	}
+	guest.mu.Lock()
+	generation := guest.generation
+	token := guest.membershipToken
+	currentRoom := guest.room
+	guest.mu.Unlock()
+	if token == 0 || token == oldToken {
+		t.Fatal("rejoin reused the previous membership token")
+	}
+	close(releaseCancel)
+	code(t, awaitErr(t, old), "REQUEST_TIMEOUT")
+	rooms, err := m.ListPublic(context.Background())
+	if err != nil || len(rooms) != 1 {
+		t.Fatal(err, rooms)
+	}
+	got := rooms[0]
+	if len(got.Members) != 2 || got.Members[1].SessionID != guest.ID() {
+		t.Fatalf("old canceled generation removed newer successful membership: members=%v", got.Members)
+	}
+	if got.HostID != host.ID() || got.Revision != joined.Revision {
+		t.Fatalf("stale cleanup changed host/revision: got=%+v joined=%+v", got, joined)
+	}
+	guest.mu.Lock()
+	defer guest.mu.Unlock()
+	if guest.room != currentRoom || guest.generation != generation || guest.membershipToken != token {
+		t.Fatal("stale cleanup changed current session membership")
+	}
+}

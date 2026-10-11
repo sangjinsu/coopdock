@@ -55,11 +55,12 @@ type Config struct {
 	ArgonThreads                                                          uint8
 	SaltBytes, HashBytes                                                  uint32
 	// Private hooks allow deterministic interleaving tests without changing public APIs.
-	hash         func([]byte, []byte) []byte
-	number       func() (string, error)
-	now          func() time.Time
-	beforeSubmit func()
-	afterCommit  func()
+	hash                func([]byte, []byte) []byte
+	number              func() (string, error)
+	now                 func() time.Time
+	beforeSubmit        func()
+	beforeCancelCleanup func()
+	afterCommit         func()
 }
 
 func DefaultConfig() Config {

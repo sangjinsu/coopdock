@@ -74,15 +74,20 @@ func (m *Manager) cancel(s *Session, g uint64) {
 	m.mu.Lock()
 	s.mu.Lock()
 	var r *actor
+	var token uint64
 	if s.generation == g {
 		s.generation++
 		s.joining = false
 		r = s.room
+		token = s.membershipToken
 	}
 	s.mu.Unlock()
 	m.mu.Unlock()
 	if r != nil {
-		r.cleanup(s)
+		if m.cfg.beforeCancelCleanup != nil {
+			m.cfg.beforeCancelCleanup()
+		}
+		r.cleanup(s, token)
 	}
 }
 func (m *Manager) finish(ctx context.Context, s *Session, g uint64, r *actor) (Snapshot, error) {
@@ -196,7 +201,7 @@ func (m *Manager) Create(ctx context.Context, s *Session, o CreateOptions) (Snap
 	}
 	v, e := m.finish(ctx, s, g, r)
 	if e != nil {
-		r.cleanup(s)
+		r.cleanup(s, g)
 	}
 	return v, e
 }
@@ -279,6 +284,7 @@ func (m *Manager) Leave(ctx context.Context, s *Session) error {
 		return failure("SESSION_CLOSED")
 	}
 	r := s.room
+	token := s.membershipToken
 	s.generation++
 	s.joining = false
 	s.mu.Unlock()
@@ -286,7 +292,7 @@ func (m *Manager) Leave(ctx context.Context, s *Session) error {
 	if r == nil {
 		return failure("NOT_IN_ROOM")
 	}
-	r.cleanup(s)
+	r.cleanup(s, token)
 	return nil
 }
 func (m *Manager) Disconnect(s *Session) {
@@ -304,10 +310,11 @@ func (m *Manager) Disconnect(s *Session) {
 		delete(m.sessions, s.id)
 	}
 	r := s.room
+	token := s.membershipToken
 	s.mu.Unlock()
 	m.mu.Unlock()
 	if r != nil {
-		r.cleanup(s)
+		r.cleanup(s, token)
 	}
 }
 func (m *Manager) ListPublic(ctx context.Context) ([]Snapshot, error) {

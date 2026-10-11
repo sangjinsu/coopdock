@@ -12,9 +12,16 @@ type command struct {
 	list   bool
 	result chan result
 }
+type memberEntry struct {
+	session *Session
+	token   uint64
+}
+
 type cleanup struct {
-	s    *Session
-	done chan struct{}
+	s      *Session
+	roomID string
+	token  uint64
+	done   chan struct{}
 }
 type actor struct {
 	manager                *Manager
@@ -22,7 +29,7 @@ type actor struct {
 	capacity               int
 	published              bool
 	password               *credential
-	members                []*Session
+	members                []memberEntry
 	revision               uint64
 	commands               chan command
 	cleanups               chan cleanup
@@ -34,16 +41,16 @@ func newActor(m *Manager, n string, o CreateOptions, p *credential) *actor {
 }
 func (r *actor) snapshot() Snapshot {
 	v := Snapshot{RoomID: r.id, RoomNumber: r.number, Visibility: r.visibility, Capacity: r.capacity, Phase: "WAITING", Members: []Member{}, Revision: r.revision, LastProcessedInputSeq: map[string]uint64{}}
-	for _, s := range r.members {
-		v.Members = append(v.Members, Member{s.id})
+	for _, entry := range r.members {
+		v.Members = append(v.Members, Member{entry.session.id})
 	}
 	if len(r.members) > 0 {
-		v.HostID = r.members[0].id
+		v.HostID = r.members[0].session.id
 	}
 	return v
 }
-func (r *actor) cleanup(s *Session) {
-	c := cleanup{s: s, done: make(chan struct{})}
+func (r *actor) cleanup(s *Session, token uint64) {
+	c := cleanup{s: s, roomID: r.id, token: token, done: make(chan struct{})}
 	select {
 	case r.cleanups <- c:
 	case <-r.done:
@@ -54,38 +61,45 @@ func (r *actor) cleanup(s *Session) {
 	case <-r.done:
 	}
 }
-func (r *actor) remove(s *Session) {
-	for i, x := range r.members {
-		if x == s {
-			r.members = append(r.members[:i], r.members[i+1:]...)
-			r.revision++
-			break
-		}
-	}
+
+// Cleanup is bound to the committed membership, not the current reservation generation.
+func (r *actor) remove(s *Session, roomID string, token uint64) bool {
 	m := r.manager
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	s.mu.Lock()
-	if s.room == r {
-		s.room = nil
+	defer s.mu.Unlock()
+	if roomID != r.id || token == 0 || s.room != r || s.membershipToken != token {
+		return false
 	}
-	s.mu.Unlock()
-	m.mu.Unlock()
+	for i, entry := range r.members {
+		if entry.session == s && entry.token == token {
+			r.members = append(r.members[:i], r.members[i+1:]...)
+			r.revision++
+			s.room = nil
+			s.membershipToken = 0
+			return true
+		}
+	}
+	return false
 }
 func (r *actor) broadcast() {
 	for {
 		v := r.snapshot()
-		var slow []*Session
-		for _, s := range r.members {
+		var slow []memberEntry
+		for _, entry := range r.members {
+			s := entry.session
 			select {
 			case s.events <- v.clone():
 			default:
-				slow = append(slow, s)
+				slow = append(slow, entry)
 			}
 		}
 		if len(slow) == 0 {
 			return
 		}
-		for _, s := range slow {
+		for _, entry := range slow {
+			s := entry.session
 			m := r.manager
 			m.mu.Lock()
 			s.mu.Lock()
@@ -98,7 +112,7 @@ func (r *actor) broadcast() {
 			}
 			s.mu.Unlock()
 			m.mu.Unlock()
-			r.remove(s)
+			r.remove(s, r.id, entry.token)
 		}
 	}
 }
@@ -125,8 +139,9 @@ func (r *actor) admit(c command) result {
 		return result{err: failure("ROOM_FULL")}
 	}
 	r.published = true
-	r.members = append(r.members, s)
+	r.members = append(r.members, memberEntry{session: s, token: c.g})
 	s.room = r
+	s.membershipToken = c.g
 	s.joining = false
 	r.revision++
 	return result{snap: r.snapshot()}
@@ -138,14 +153,16 @@ func (r *actor) run() {
 		var c cleanup
 		select {
 		case c = <-r.cleanups:
-			r.remove(c.s)
-			r.broadcast()
+			if r.remove(c.s, c.roomID, c.token) {
+				r.broadcast()
+			}
 			close(c.done)
 		default:
 			select {
 			case c = <-r.cleanups:
-				r.remove(c.s)
-				r.broadcast()
+				if r.remove(c.s, c.roomID, c.token) {
+					r.broadcast()
+				}
 				close(c.done)
 			case v := <-r.commands:
 				if v.list {
