@@ -107,6 +107,7 @@ type Snapshot struct {
     RoomID string `json:"room_id"`
     RoomNumber string `json:"room_number"`
     Visibility string `json:"visibility"`
+    Capacity int `json:"capacity"`
     MatchID *string `json:"match_id"`
     Phase string `json:"phase"`
     HostID string `json:"host_id"`
@@ -137,7 +138,7 @@ func CodeOf(error) string
 
 `Config`, `Manager`, `Session`은 이 작업의 해당 파일에서 정의한다. `Config`에는 위 상한·timeout과 Argon2id 설정을 둔다. `Session`의 변경 가능한 필드는 비공개다. `Events`는 유한 중요 이벤트 FIFO이고 `Done`은 세션 종료를 알린다. 포화 시 session closing·cleanup을 신호로 보내되 actor는 socket IO나 자신의 queue에 넣는 작업으로 막히지 않는다. `Disconnect`는 반복 호출해도 안전하며 늦은 결과를 먼저 무효화한다. `Close`는 신규 admission을 닫고 세션·actor·hash 작업을 context 상한까지 정리한다.
 
-- [ ] **Step 1: 실패할 코어 시험을 먼저 작성한다.** 다음 공개 정원 시험을 `manager_test.go`에 추가하고 private·Unicode·host 승계·빈 룸 삭제 시험을 같은 API로 작성한다.
+- [x] **Step 1: 실패할 코어 시험을 먼저 작성한다.** 다음 공개 정원 시험을 `manager_test.go`에 추가하고 private·Unicode·host 승계·빈 룸 삭제 시험을 같은 API로 작성한다.
 
 ```go
 func TestRoomCapacity(t *testing.T) {
@@ -158,7 +159,7 @@ func TestRoomCapacity(t *testing.T) {
 
 각 subtest의 입력과 기대값은 다음과 같다: capacity `0`은 기본 6, `-1/7`은 `INVALID_MESSAGE`; public password `nil`은 성공하고 `&""`·`&"abcd"`는 `INVALID_MESSAGE`; private password 누락·3·65문자는 `INVALID_MESSAGE`; 4·64문자와 `" 가 나 "`는 원문대로 성공; private 목록 제외; 잘못된 6자리 형식은 `INVALID_MESSAGE`, 없는 번호는 `ROOM_NOT_FOUND`, 비밀번호 누락은 `PASSWORD_REQUIRED`, 다른 값은 `PASSWORD_INVALID`. 별도 연결의 host 퇴장 후 첫 잔여 참가자 승계와 마지막 퇴장 후 `ROOM_NOT_FOUND`를 확인한다.
 
-- [ ] **Step 2: 위 시험을 실행해 미구현으로 실패함을 확인한다.** module 부재로 실행 불가이면 공식 문서로 확인한 `go.mod`만 먼저 만들고 다시 실행한다.
+- [x] **Step 2: 위 시험을 실행해 미구현으로 실패함을 확인한다.** module 부재로 실행 불가이면 공식 문서로 확인한 `go.mod`만 먼저 만들고 다시 실행한다.
 
 ```bash
 go test ./internal/room -run TestRoomCapacity -count=1
@@ -166,7 +167,7 @@ go test ./internal/room -run TestRoomCapacity -count=1
 
 기대 결과: `NewManager` 등 아직 없는 구현 때문에 FAIL. dependency 버전·Go 요구 버전은 조사 결과를 사용한다.
 
-- [ ] **Step 3: 최소 코어를 구현한다.** registry에서 `crypto/rand`로 6자리 후보를 만들고 중복 검사·예약을 함께 수행한다. 예약 → actor 명령 → 입장 확정을 구현하며 public create·join, leave·disconnect·Close가 같은 membership 정리 경로를 사용한다. `Error`에 고정된 code/message만 넣고 요청·비밀번호를 문자열화하지 않는다.
+- [x] **Step 3: 최소 코어를 구현한다.** registry에서 `crypto/rand`로 6자리 후보를 만들고 중복 검사·예약을 함께 수행한다. 예약 → actor 명령 → 입장 확정을 구현하며 public create·join, leave·disconnect·Close가 같은 membership 정리 경로를 사용한다. `Error`에 고정된 code/message만 넣고 요청·비밀번호를 문자열화하지 않는다.
 
 ```go
 // Preserve absent and empty password as different inputs.
@@ -177,7 +178,7 @@ if opts.Visibility == "public" && opts.Password != nil {
 // The actor owns capacity checks, membership updates and host succession.
 ```
 
-- [ ] **Step 4: private 계산·취소·상한 시험을 먼저 작성하고 실패를 확인한다.** test용 hash barrier·clock·번호 생성기를 package 비공개 경계에 주입해 실제 Argon 계산 시간에 의존하지 않는 interleaving을 만든다. `password_test.go`는 실제 Argon2id 생성·검증과 salt 차이도 확인한다.
+- [x] **Step 4: private 계산·취소·상한 시험을 먼저 작성하고 실패를 확인한다.** test용 hash barrier·clock·번호 생성기를 package 비공개 경계에 주입해 실제 Argon 계산 시간에 의존하지 않는 interleaving을 만든다. `password_test.go`는 실제 Argon2id 생성·검증과 salt 차이도 확인한다.
 
 | 시험 이름 | 강제한 순서와 기대 결과 |
 |---|---|
@@ -198,7 +199,7 @@ go test ./internal/room -count=1
 
 기대 결과: 아직 처리하지 않은 interleaving 시험 FAIL. 취소 시 actor cleanup에는 취소된 request context를 전달하지 않는다.
 
-- [ ] **Step 5: 검증 결과의 room_id·generation binding, worker 상한, 실패 TTL과 cleanup을 구현한 뒤 검증한다.** 이미 실행 중인 Argon 계산은 worker 안에서 끝나며 결과 수신 시 폐기한다. 세션은 정리가 끝나기 전 새 요청을 확정할 수 없다. snapshot은 깊은 복사로 반환한다.
+- [x] **Step 5: 검증 결과의 room_id·generation binding, worker 상한, 실패 TTL과 cleanup을 구현한 뒤 검증한다.** 이미 실행 중인 Argon 계산은 worker 안에서 끝나며 결과 수신 시 폐기한다. 세션은 정리가 끝나기 전 새 요청을 확정할 수 없다. snapshot은 깊은 복사로 반환한다.
 
 ```bash
 go test ./internal/room -count=1
@@ -208,7 +209,7 @@ go vet ./internal/room
 
 기대 결과: PASS, race·vet 오류 없음. 공식 dependency 출처와 실제 Go 요구 버전을 기록하고 `gofmt`를 적용한다.
 
-- [ ] **Step 6: 독립 검토 후 작업 파일만 commit한다.** core worker가 ownership을 가진 Go 파일과 module 파일만 stage한다. parent는 producer API와 시험 근거를 확인한다.
+- [x] **Step 6: 독립 검토 후 작업 파일만 commit한다.** core worker가 ownership을 가진 Go 파일과 module 파일만 stage한다. parent는 producer API와 시험 근거를 확인한다.
 
 ```bash
 git add outputs/server/go.mod outputs/server/go.sum outputs/server/internal/room
@@ -232,7 +233,7 @@ func (s *Server) Close(context.Context) error
 
 `transport.Config`는 허용 Origin, message·송신 queue 한계와 read/write/request timeout을 정의한다. `config.Load()`는 환경변수를 검증해 room·transport config와 HTTP listen 주소를 반환한다. HTTP 처리 전에 실패하면 고정된 원인만 로그로 출력하고 종료한다.
 
-- [ ] **Step 1: JSON과 실제 WebSocket 실패 시험을 먼저 작성한다.** `message_test.go`에 필드 타입·누락·미지원 op 시험을, `server_test.go`에 `httptest.NewServer`와 공식 websocket dial API를 사용한 통합 시험을 추가한다.
+- [x] **Step 1: JSON과 실제 WebSocket 실패 시험을 먼저 작성한다.** `message_test.go`에 필드 타입·누락·미지원 op 시험을, `server_test.go`에 `httptest.NewServer`와 공식 websocket dial API를 사용한 통합 시험을 추가한다.
 
 ```json
 {"version":1,"op":"room.create","request_id":"create","payload":{"capacity":6,"visibility":"public"},"error":null}
@@ -249,13 +250,13 @@ func (s *Server) Close(context.Context) error
 
 각 시험은 다음 입력을 보낸다: malformed JSON, 한 frame의 JSON 두 개, version `2`, request_id 누락·잘못된 타입, payload `null`·잘못된 타입, capacity `0`·`1.5`, visibility `""`, password 숫자, room_number 숫자·전각 숫자·5/7자리, public password `""`. 모두 `INVALID_MESSAGE`로 처리하고 크기 초과·허용되지 않은 Origin은 연결 또는 frame을 거부한다. capacity·visibility 기본값은 필드 누락 때만 적용한다.
 
-- [ ] **Step 2: 미구현 상태에서 시험이 실패함을 확인한다.**
+- [x] **Step 2: 미구현 상태에서 시험이 실패함을 확인한다.**
 
 ```bash
 go test ./internal/protocol ./internal/transport ./internal/config -count=1
 ```
 
-- [ ] **Step 3: guest 발급과 요청·응답을 구현한다.** 접속 직후 `session.guest` 이벤트를 보내고 실제 connection의 Session을 사용한다. 요청마다 같은 `op`·`request_id`로 응답하며 create/join 성공 payload는 `{"snapshot":...}`, list 성공은 `{"rooms":[...]}`, leave 성공은 `{}`다. `room.state` 이벤트의 request_id는 null이다. 초기 게임 필드는 match_id·game_state null, tick 0, 적용 입력 map 빈 값으로 보낸다.
+- [x] **Step 3: guest 발급과 요청·응답을 구현한다.** 접속 직후 `session.guest` 이벤트를 보내고 실제 connection의 Session을 사용한다. 요청마다 같은 `op`·`request_id`로 응답하며 create/join 성공 payload는 `{"snapshot":...}`, list 성공은 `{"rooms":[...]}`, leave 성공은 `{}`다. `room.state` 이벤트의 request_id는 null이다. 초기 게임 필드는 match_id·game_state null, tick 0, 적용 입력 map 빈 값으로 보낸다.
 
 ```json
 {"version":1,"op":"session.guest","request_id":null,"payload":{"session_id":"server-issued-id"},"error":null}
@@ -266,7 +267,7 @@ go test ./internal/protocol ./internal/transport ./internal/config -count=1
 
 단일 reader와 writer를 사용하되 비밀번호 계산을 비동기 요청 worker로 넘긴다. reader의 ingress enqueue는 nonblocking이며 검증 대기 중에도 disconnect를 감지해 Session을 취소할 수 있어야 한다. 중요 FIFO 포화 또는 Session.Done 시 연결을 종료하고 Disconnect를 호출한다. 새 참가자의 초기 성공 응답을 먼저 enqueue한 뒤 같은 revision의 초기 이벤트와 이후 room.state를 전달하는 연결별 fence를 두며 actor를 네트워크 쓰기로 막지 않는다. `room.start`, `game.action`, admin 경로는 README에 미제공으로 명시하고 요청은 `INVALID_MESSAGE`로 거절한다.
 
-- [ ] **Step 4: 서버 실행과 종료, 실제 연결 검증을 먼저 시험한다.** health는 200, ready는 수용 중 200·Close 시작 후 503. 종료는 admission 차단 → WS close/cancel → membership·actor·worker 정리 → HTTP shutdown 순서로 수행한다.
+- [x] **Step 4: 서버 실행과 종료, 실제 연결 검증을 먼저 시험한다.** health는 200, ready는 수용 중 200·Close 시작 후 503. 종료는 admission 차단 → WS close/cancel → membership·actor·worker 정리 → HTTP shutdown 순서로 수행한다.
 
 | 시험 이름 | 관측할 결과 |
 |---|---|
@@ -283,7 +284,7 @@ go test ./internal/protocol ./internal/transport ./internal/config -count=1
 go test ./internal/transport -count=1
 ```
 
-- [ ] **Step 5: 통합 시험을 통과시키고 runnable README를 작성한다.** README에는 필요한 Go 버전, `go run ./cmd/server`, 실제 설정 key·기본값·상한, `/healthz`·`/readyz`·`/ws`, public/private JSON 순서, SIGINT/SIGTERM 종료, 메모리 저장·새 guest 정책을 넣는다. 실제 검증 CLI가 필요하면 public/private 6명 입장과 마지막 자리 race를 반복 가능한 명령으로 제공하고 assertion 실패 시 nonzero 종료한다. simulation·admin·Godot 게임 화면은 현재 미구현으로 안내한다.
+- [x] **Step 5: 통합 시험을 통과시키고 runnable README를 작성한다.** README에는 필요한 Go 버전, `go run ./cmd/server`, 실제 설정 key·기본값·상한, `/healthz`·`/readyz`·`/ws`, public/private JSON 순서, SIGINT/SIGTERM 종료, 메모리 저장·새 guest 정책을 넣는다. 실제 검증 CLI가 필요하면 public/private 6명 입장과 마지막 자리 race를 반복 가능한 명령으로 제공하고 assertion 실패 시 nonzero 종료한다. simulation·admin·Godot 게임 화면은 현재 미구현으로 안내한다.
 
 ```bash
 go test ./... -count=1
@@ -294,7 +295,7 @@ go build -o bin/roomserver ./cmd/server
 
 기대 결과: 모두 PASS. 실제 프로세스를 띄워 HTTP 준비 확인, 6 WS 입장·7번째 거절, private 비밀번호 순서, timeout·SIGTERM 종료를 실행한다. 이 검증은 부하·수용 규모 측정이 아니다. 실제 결과와 환경을 README 또는 parent 최종 보고에 구분해 기록한다.
 
-- [ ] **Step 6: 독립 architect 검증 후 명시 stage하고 commit한다.** stage 전 diff에 실제 dependency·설정값·API와 문서가 일치하는지 확인하고 다른 worker 파일은 stage하지 않는다.
+- [x] **Step 6: 독립 architect 검증 후 명시 stage하고 commit한다.** stage 전 diff에 실제 dependency·설정값·API와 문서가 일치하는지 확인하고 다른 worker 파일은 stage하지 않는다.
 
 ```bash
 git add outputs/server/go.mod outputs/server/go.sum outputs/server/internal/protocol outputs/server/internal/transport outputs/server/internal/config outputs/server/cmd/server outputs/server/README.md
@@ -308,3 +309,10 @@ git commit -m "feat: expose room entry over websocket with runnable server"
 확정된 첫 구현 범위는 Task 1의 룸·예약·비밀번호와 Task 2의 실제 연결·정리·실행 안내에 대응한다. 미래 게임·운영 항목은 Global Constraints의 후속 범위다. 위 인터페이스는 구현 worker가 공유하는 계약 제안이며 실제 API·설정 확정 후 문서와 코드를 일치시킨다. 실제 시험 통과나 서버 구현 완료를 이 계획만으로 주장하지 않는다.
 
 구현 review에서는 admission gate → session lock 순서를 통일하고 해당 Manager가 발급한 Session인지 검사한다. actor 자신의 이벤트 포화는 직접 퇴장 처리해 self-enqueue 교착을 피하고 mailbox는 닫지 않은 채 Done으로 종료한다. 취소된 hash의 worker permit은 실제 계산 return까지 유지한다. private create는 hash 완료 후 번호 확보·최종 admission을 수행해 미게시 번호 예약 정리를 단순화할 수 있다.
+
+## 작업 완료 기록
+
+- Task 1: `6e5671264226e457aadc7732437b81b259db0b9a` — 룸 코어·private 입장 구현, RED/GREEN·전체 test/race/vet 및 독립 검토 APPROVED 후 commit. 근거: `.superpowers/sdd/room-entry-plan/task-1-report.md`, `task-1-review.md`.
+- Task 2: `7869e9ee587229d8351f0abbb448cc5300092b8d` — 실제 WebSocket·실행 안내 구현, RED/GREEN·전체 test/race/vet/build와 실제 CLI·SIGTERM 실행 근거, 독립 Architect의 스펙·품질 APPROVED 후 commit. 근거: `.superpowers/sdd/room-entry-plan/task-2-report.md`, `task-2-review.md`.
+
+위 체크는 각 Task의 구현·독립 검토·commit 완료를 표시한다. 전체 branch Architect 검증과 fresh final QA는 별도 후속 단계이며, 게임 simulation·운영 기능·Godot 클라이언트·운영 부하와 성능 측정 완료를 의미하지 않는다.
