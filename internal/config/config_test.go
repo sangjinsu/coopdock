@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestMovementRateConfig(t *testing.T) {
 	t.Setenv("ROOM_TICK_HZ", "20")
@@ -62,6 +65,28 @@ func TestLoadConfiguresRuntime(t *testing.T) {
 	t.Setenv("WS_ORIGINS", "localhost:9000, example.com")
 	c, e := Load()
 	if e != nil || c.Address != "127.0.0.1:9090" || c.Room.MaxRooms != 3 || c.Transport.OutboundQueue != 8 || len(c.Transport.Origins) != 2 {
-		t.Fatalf("%+v %v", c, e)
+		t.Fatalf("runtime settings mismatch: address=%q room_max_rooms=%d ws_outbound_queue=%d ws_origins_count=%d load_failed=%t", c.Address, c.Room.MaxRooms, c.Transport.OutboundQueue, len(c.Transport.Origins), e != nil)
+	}
+}
+
+func TestAdminViewerEnvironment(t *testing.T) {
+	good := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	for i, tc := range []struct {
+		value string
+		valid bool
+	}{{"", true}, {good, true}, {good + " ", false}, {" " + good, false}, {"short", false}, {good + "\t", false}, {good + "한", false}} {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			t.Setenv("ADMIN_VIEWER_TOKEN", tc.value)
+			c, e := Load()
+			if (e == nil) != tc.valid {
+				t.Fatalf("valid=%v mismatch", tc.valid)
+			}
+			if e == nil && c.Admin.ViewerToken != tc.value {
+				t.Fatal("raw token changed")
+			}
+			if e != nil && e.Error() != "Invalid ADMIN_VIEWER_TOKEN." {
+				t.Fatal("unsafe error")
+			}
+		})
 	}
 }

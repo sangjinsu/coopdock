@@ -7,9 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"roomserver/internal/admin"
 	"roomserver/internal/config"
+	"roomserver/internal/observability"
 	"roomserver/internal/room"
 	"roomserver/internal/transport"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -25,18 +28,36 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 	m, e := room.NewManager(cfg.Room)
 	if e != nil {
 		return e
 	}
 	s, e := transport.New(m, cfg.Transport)
 	if e != nil {
-		m.Close(context.Background())
-		return e
+		shutdown, stop := context.WithTimeout(context.Background(), cfg.Transport.ShutdownTimeout)
+		defer stop()
+		return errors.Join(e, m.Close(shutdown))
 	}
-	h := &http.Server{Addr: cfg.Address, Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	var collector *observability.Collector
+	if cfg.Admin.Enabled() {
+		startup, stop := context.WithTimeout(ctx, 5*time.Second)
+		collector, e = observability.New(startup, observability.Source{Rooms: m.OperationsSnapshot, Transport: s.LiveStatus}, observability.DefaultConfig())
+		stop()
+		if e != nil {
+			shutdown, stop := context.WithTimeout(context.Background(), cfg.Transport.ShutdownTimeout)
+			defer stop()
+			return errors.Join(e, closeServices(shutdown, s, nil, nil))
+		}
+	}
+	handler, e := buildHandler(cfg, s, collector)
+	if e != nil {
+		shutdown, stop := context.WithTimeout(context.Background(), cfg.Transport.ShutdownTimeout)
+		defer stop()
+		return errors.Join(e, closeServices(shutdown, s, nil, collector))
+	}
+	h := &http.Server{Addr: cfg.Address, Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	errs := make(chan error, 1)
 	go func() { errs <- h.ListenAndServe() }()
 	log.Printf("Room entry server listening on %s", cfg.Address)
@@ -47,13 +68,40 @@ func run() error {
 	}
 	shutdown, stop := context.WithTimeout(context.Background(), cfg.Transport.ShutdownTimeout)
 	defer stop()
-	closeErr := s.Close(shutdown)
-	httpErr := h.Shutdown(shutdown)
-	if listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
-		return listenErr
+	closeErr := closeServices(shutdown, s, h, collector)
+	if errors.Is(listenErr, http.ErrServerClosed) {
+		listenErr = nil
 	}
-	if closeErr != nil {
-		return closeErr
+	return errors.Join(listenErr, closeErr)
+}
+func buildHandler(cfg config.Config, s *transport.Server, c *observability.Collector) (http.Handler, error) {
+	dashboard, e := admin.New(cfg.Admin, c)
+	if e != nil {
+		return nil, e
 	}
-	return httpErr
+	public := s.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Dispatch before ServeMux can canonicalize an admin-prefixed path.
+		if r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
+			dashboard.ServeHTTP(w, r)
+			return
+		}
+		public.ServeHTTP(w, r)
+	}), nil
+}
+func closeServices(ctx context.Context, s *transport.Server, h *http.Server, c *observability.Collector) error {
+	if c != nil {
+		c.MarkStopping()
+	}
+	var errs []error
+	if s != nil {
+		errs = append(errs, s.Close(ctx))
+	}
+	if h != nil {
+		errs = append(errs, h.Shutdown(ctx))
+	}
+	if c != nil {
+		errs = append(errs, c.Close(ctx))
+	}
+	return errors.Join(errs...)
 }

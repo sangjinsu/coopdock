@@ -40,7 +40,7 @@
 | 작업 | 소유 파일·책임 |
 |---|---|
 | Task 1 | `internal/room/operations.go`, `operations_test.go`; 기존 `actor.go`, `realtime.go`, `manager.go`, `types.go`의 summary 게시·독립 ticker seam |
-| Task 2 | `internal/transport/server.go`, `server_test.go`, 새 `operations_test.go`; `internal/observability/collector.go`, `collector_test.go`: 실제 live count와 불변 수집 cache |
+| Task 2 | `internal/transport/server.go`, 기존 `server_test.go` helper 재사용, 새 `operations_test.go`; `internal/observability/collector.go`, `collector_test.go`: 실제 live count와 불변 수집 cache |
 | Task 3 | `internal/admin/auth.go`, `http.go`, `web.go`, 각 시험, `internal/admin/web/index.html`, `dashboard.css`, `dashboard.js`; `internal/config/config.go`, `config_test.go`; `cmd/server/main.go`, 새 `main_test.go`: 인증·API·보호된 skeleton·설정·wiring |
 | Task 4 | `internal/admin/web/index.html`, `dashboard.css`, `dashboard.js`: 한국어 UI·polling·browser QA |
 | Task 5 | `README.md`, `docs/server-guide.md`, `docs/specs/README.md`, `01-overview.md`, `04-messages-and-api.md`, `05-operations-dashboard.md`, `07-implementation-and-config.md`, `08-validation.md`, `docs/go-room-server-design.md`: 구현 상태·사용 가이드·구조도·최종 검증 |
@@ -220,7 +220,7 @@ X-Frame-Options: DENY
 
 `web.go`의 `//go:embed web/index.html web/dashboard.css web/dashboard.js`로 세 파일만 포함한다. 정해진 asset map만 제공해 directory listing/fallback/traversal을 만들지 않는다. inline script/style/event handler 없이 relative asset URL을 사용한다.
 
-config.Config에 `Admin admin.Config`만 추가한다. main의 상위 ServeMux가 `/admin`과 `/admin/`를 admin handler로, `/`를 기존 transport.Handler로 연결한다. admin 비활성 때도 disabled handler를 등록하되 collector는 nil이며 New가 이를 허용한다. 활성+nil collector는 고정 오류로 거절한다. source는 `Rooms:m.OperationsSnapshot`, `Transport:s.LiveStatus`로 main이 wrap한다. startup에 5초 context를 사용하고 실패 시 transport/manager 정리를 bounded 수행한다.
+config.Config에 `Admin admin.Config`만 추가한다. main의 outer `http.HandlerFunc`가 `r.URL.Path=="/admin"` 또는 `/admin/` prefix를 admin handler로 먼저 dispatch하고, 나머지를 기존 transport.Handler로 연결한다. 따라서 public ServeMux의 canonical redirect 전에 비활성·인증 정책이 적용된다. admin handler는 검사 후 고정 allowlist path/method를 직접 분기하며 비정규 prefix 경로는 인증 후 404다. admin 비활성 때도 disabled handler를 등록하되 collector는 nil이며 New가 이를 허용한다. 활성+nil collector는 고정 오류로 거절한다. source는 `Rooms:m.OperationsSnapshot`, `Transport:s.LiveStatus`로 main이 wrap한다. startup에 5초 context를 사용하고 실패 시 transport/manager 정리를 bounded 수행한다.
 
 종료 순서는 collector.MarkStopping→transport.Close(shutdown context)→http.Server.Shutdown(같은 context)→collector.Close(같은 context)다. 각 호출은 이전 오류와 무관하게 수행하고 error를 모은다. Close가 deadline 뒤 정리 중인 transport/collector를 강제로 종료했다고 보고하지 않는다. HTTP Shutdown은 hijacked WS를 정리하지 않으므로 transport.Close를 생략하지 않는다. listen 오류 경로도 동일 정리를 수행한다.
 
@@ -349,7 +349,7 @@ git commit -m "feat: publish immutable room operation summaries"
 
 **독립 산출물:** accepted live WS count와 instance/runtime/room 집계 cache를 제공한다. admin route는 아직 없으며 기존 서버는 정상 compile한다.
 
-**Files:** Modify `internal/transport/server.go`, `internal/transport/server_test.go`; Create `internal/transport/operations_test.go`, `internal/observability/collector.go`, `collector_test.go`.
+**Files:** Modify `internal/transport/server.go`; 기존 `internal/transport/server_test.go` helper를 수정 없이 재사용; Create `internal/transport/operations_test.go`, `internal/observability/collector.go`, `collector_test.go`.
 
 **Interfaces:** Task 1 OperationsSnapshot을 소비한다. LiveStatus, Source/Config/Snapshot/Collector 전체 계약을 생산한다. source callback은 collector worker만 호출하고 HTTP가 소비할 Load는 atomic 값 복사뿐이다.
 

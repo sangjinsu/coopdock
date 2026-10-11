@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"roomserver/internal/admin"
 	"roomserver/internal/room"
 	"roomserver/internal/transport"
 	"strconv"
@@ -13,13 +14,17 @@ import (
 )
 
 type Config struct {
+	Admin     admin.Config
 	Address   string
 	Room      room.Config
 	Transport transport.Config
 }
 
 func Load() (Config, error) {
-	c := Config{Address: "127.0.0.1:8080", Room: room.DefaultConfig(), Transport: transport.DefaultConfig()}
+	c := Config{Admin: admin.Config{ViewerToken: os.Getenv("ADMIN_VIEWER_TOKEN")}, Address: "127.0.0.1:8080", Room: room.DefaultConfig(), Transport: transport.DefaultConfig()}
+	if e := c.Admin.Validate(); e != nil {
+		return c, e
+	}
 	if v, ok := os.LookupEnv("HTTP_ADDR"); ok {
 		c.Address = v
 	}
