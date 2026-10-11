@@ -3,9 +3,11 @@
 Go **1.26 이상**이 필요합니다. `roomserver`는 내부 module 이름입니다. 이 서버는 하나의 프로세스에서 guest 연결, 룸 생성, ASCII 6자리 번호 입장, private 비밀번호 확인, 공개 목록, 퇴장과 연결 정리를 제공합니다.
 
 ```bash
-cd outputs/coopdock
+cd /Users/sangjinsu/Documents/ChatGPT/coopdock
 go run ./cmd/server
 ```
+
+설계 문서는 [전체 설계](docs/go-room-server-design.md)와 [기능별 스펙](docs/specs/README.md)을 참조합니다.
 
 기본 주소는 `127.0.0.1:8080`입니다. 다른 주소가 필요하면 `HTTP_ADDR=127.0.0.1:9090 go run ./cmd/server`처럼 지정합니다.
 

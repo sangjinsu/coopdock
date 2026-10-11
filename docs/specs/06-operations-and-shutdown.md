@@ -1,6 +1,6 @@
 # 06. 운영 조작과 종료 — 명령의 결과를 확인하기
 
-[전체 목차](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/README.md) · [상세 설계 원본](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/go-room-server-design.md)
+[전체 목차](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/README.md) · [상세 설계 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
 
 ## 무엇을 위한 기능인가
 
@@ -97,7 +97,7 @@ private 검증 중 drain으로 예약이 취소되면 늦은 검증 결과로 �
 
 drain 명령의 `succeeded`는 **새 게임 차단 전환 완료**다. 프로세스 종료 완료는 별도의 서버 진행 상태다.
 종료 후 화면 polling이 끊기는 것은 정상일 수 있으며 이를 명령 실패로 단정하지 않는다.
-경로와 결과 필드는 [04. 메시지와 API](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/04-messages-and-api.md)에서 확인한다.
+경로와 결과 필드는 [04. 메시지와 API](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/04-messages-and-api.md)에서 확인한다.
 
 ## 구현 후 확인할 것
 

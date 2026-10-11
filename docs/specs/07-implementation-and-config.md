@@ -1,12 +1,12 @@
 # 07. 구현 순서와 설정 — 무엇부터 만들 것인가
 
-[전체 목차](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/README.md) · [상세 설계 원본](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/go-room-server-design.md)
+[전체 목차](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/README.md) · [상세 설계 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
 
 ## 이 문서의 목적
 
 **서버의 역할을 나누고 개발 순서와 조정할 설정을 정한다.**
 예를 들어 먼저 “6명이 같은 룸에 들어가고 퇴장한다”를 확인한 다음 이동 규칙과 운영 화면을 붙인다.
-아래 폴더·파일은 목표 구조이며 현재 서버 구현의 파일 구성과 다를 수 있다. 실제 구현 범위·구성과 실행 방법·검증은 [서버 README](../coopdock/README.md)를 참조한다. 운영 API와 대시보드 자산은 후속 구현 범위다.
+아래 폴더·파일은 목표 구조이며 현재 서버 구현의 파일 구성과 다를 수 있다. 실제 구현 범위·구성과 실행 방법·검증은 [서버 README](../../README.md)를 참조한다. 운영 API와 대시보드 자산은 후속 구현 범위다.
 
 ## 확정 범위와 초기 선택
 
@@ -118,5 +118,5 @@ Godot의 표시·보간·예측은 클라이언트 후속 작업이다. 서버 �
 - 설정값이 실제 실행에 적용되고 룸 정원 1~6 범위를 벗어나면 거절되는지 확인한다.
 - actor 외부에서 룸 상태를 변경하지 않고 정리·운영·송신의 대기열이 분리되는지 확인한다.
 - 번호 충돌·private 입장 검증·취소·포화와 비밀정보 제외를 검증하고 hash 비용의 tick 영향을 측정한다.
-- 각 단계의 사용자 결과를 [08. 검증 계획](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/08-validation.md)에 따라 확인한다.
+- 각 단계의 사용자 결과를 [08. 검증 계획](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/08-validation.md)에 따라 확인한다.
 - 서버·시험용 클라이언트·실제 Godot 클라이언트의 검증 결과를 각각 구분해 기록한다.

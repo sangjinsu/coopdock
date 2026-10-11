@@ -1,6 +1,6 @@
 # 08. 검증 계획 — 어떤 상황에서 무엇을 확인할 것인가
 
-[전체 목차](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/README.md) · [상세 설계 원본](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/go-room-server-design.md)
+[전체 목차](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/README.md) · [상세 설계 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
 
 ## 이 문서의 목적
 
@@ -108,4 +108,4 @@ RTT는 왕복 시간이며 화면 지연을 대신하지 않는다. 클라이언
 
 구현 후 `go test -race ./...`로 공유 상태의 데이터 경합을 검사한다. 현재는 실행하지 않았다.
 race 검사 통과와 위 상황 시험, 실제 게임 판정·성능 측정 결과를 함께 기록해야 완료 근거가 된다.
-구현 순서는 [07. 구현 순서와 설정](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/07-implementation-and-config.md)을 따른다.
+구현 순서는 [07. 구현 순서와 설정](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/07-implementation-and-config.md)을 따른다.

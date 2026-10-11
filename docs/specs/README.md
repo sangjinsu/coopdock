@@ -3,7 +3,7 @@
 이 문서는 **1~6명이 함께 이동하고 협동하는 게임 서버**를 기능별로 풀어 설명합니다.
 게임을 만드는 사람과 운영하는 사람이 같은 규칙을 이해하는 것이 목적입니다.
 
-이 문서는 **목표 설계**이며 실제 구현 범위와 구분합니다. 현재 구현 범위·실행 방법·검증은 [서버 README](../coopdock/README.md)를 참조하세요.
+이 문서는 **목표 설계**이며 실제 구현 범위와 구분합니다. 현재 구현 범위·실행 방법·검증은 [서버 README](../../README.md)를 참조하세요.
 게임별 GameHandler·Godot 클라이언트·운영 대시보드와 운영 부하·성능 측정은 후속 범위입니다.
 각 문서의 상황 예시는 앞으로 구현할 동작을 설명하며, 실제 실행 결과가 아닙니다.
 
@@ -27,14 +27,14 @@
 
 | 순서 | 문서 | 여기서 이해할 내용 |
 |---|---|---|
-| 01 | [전체 개요와 이름 후보](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/01-overview.md) | 전체 구성, 서버의 판정 권한, 초기 기술 선택과 범위 |
-| 02 | [룸과 세션](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/02-rooms-and-sessions.md) | 번호 입장·프라이빗 비밀번호·시작·퇴장·재접속 정책 |
-| 03 | [실시간 동기화](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/03-realtime-sync.md) | 이동 입력, 서버 계산, 전체 상태 전송, 화면 보정 |
-| 04 | [메시지와 API](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/04-messages-and-api.md) | JSON 형식, 요청·응답·이벤트, 게임과 운영 endpoint |
-| 05 | [운영 대시보드](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/05-operations-dashboard.md) | 운영자가 보는 화면, 지표와 정보의 갱신 시각 |
-| 06 | [운영 조작과 서버 종료](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/06-operations-and-shutdown.md) | kick·close·drain, 실행 결과와 지속 audit 기록 |
-| 07 | [구현 구조와 설정](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/07-implementation-and-config.md) | 만들 모듈, 설정 묶음, 단계별 구현 순서 |
-| 08 | [검증 기준](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/08-validation.md) | 동시 입장, 지연, 운영 부하와 종료를 확인하는 방법 |
+| 01 | [전체 개요와 이름 후보](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/01-overview.md) | 전체 구성, 서버의 판정 권한, 초기 기술 선택과 범위 |
+| 02 | [룸과 세션](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/02-rooms-and-sessions.md) | 번호 입장·프라이빗 비밀번호·시작·퇴장·재접속 정책 |
+| 03 | [실시간 동기화](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/03-realtime-sync.md) | 이동 입력, 서버 계산, 전체 상태 전송, 화면 보정 |
+| 04 | [메시지와 API](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/04-messages-and-api.md) | JSON 형식, 요청·응답·이벤트, 게임과 운영 endpoint |
+| 05 | [운영 대시보드](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/05-operations-dashboard.md) | 운영자가 보는 화면, 지표와 정보의 갱신 시각 |
+| 06 | [운영 조작과 서버 종료](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/06-operations-and-shutdown.md) | kick·close·drain, 실행 결과와 지속 audit 기록 |
+| 07 | [구현 구조와 설정](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/07-implementation-and-config.md) | 만들 모듈, 설정 묶음, 단계별 구현 순서 |
+| 08 | [검증 기준](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/08-validation.md) | 동시 입장, 지연, 운영 부하와 종료를 확인하는 방법 |
 
 ## 지금 궁금한 내용부터 찾기
 
@@ -43,11 +43,11 @@
 - “15Hz면 게임이 15FPS로 보이나?” → 03의 계산·전송·표시 구분.
 - “Godot SDK가 꼭 필요한가?” → 01의 기술 선택과 04의 연결 계약.
 - “운영 버튼을 눌렀으니 성공한 건가?” → 04의 `202 Accepted`, 06의 실제 결과.
-- “어디까지 실제로 만들어졌나?” → [서버 README](../coopdock/README.md)의 구현 범위와 검증 안내. 08은 전체 목표의 검증 계획입니다.
+- “어디까지 실제로 만들어졌나?” → [서버 README](../../README.md)의 구현 범위와 검증 안내. 08은 전체 목표의 검증 계획입니다.
 
 ## 먼저 알아둘 정책
 
-아래는 **초기 설계의 정책**입니다. 실제 구현 여부와 검증 범위는 [서버 README](../coopdock/README.md)에서 확인하세요.
+아래는 **초기 설계의 정책**입니다. 실제 구현 여부와 검증 범위는 [서버 README](../../README.md)에서 확인하세요.
 
 - 서버가 실제 위치·충돌·승패를 결정합니다. 방장은 게임을 시작할 권한을 가집니다.
 - 참가자는 번호로 들어갑니다. private는 생성자 비밀번호를 확인하고 현재 참가 중인 다음 판에는 재입력하지 않습니다.
@@ -71,5 +71,5 @@
 
 ## 전체 원본
 
-[Go 룸형 협동 게임 서버 전체 설계](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/go-room-server-design.md)는 세부 계약과 공식 자료 링크를 담은 원본입니다.
+[Go 룸형 협동 게임 서버 전체 설계](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)는 세부 계약과 공식 자료 링크를 담은 원본입니다.
 이 기능별 문서로 먼저 주제를 이해하고, 구현할 때 원본의 상세 규칙을 함께 확인하면 됩니다.

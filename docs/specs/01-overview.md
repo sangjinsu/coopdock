@@ -13,7 +13,7 @@
 | 확정 요구사항 | Godot 활용, 운영 대시보드와 조회·제어 API 포함 |
 | 초기 설계 제안 | 단일 프로세스·메모리 기반 룸, `net/http` + `coder/websocket` |
 | 초기 연결 제안 | Godot `WebSocketPeer`에서 custom JSON 사용. 전용 SDK는 필수가 아님 |
-| 실제 구현 상태 | 현재 구현 범위·실행 방법·검증은 [서버 README](../coopdock/README.md) 참조 |
+| 실제 구현 상태 | 현재 구현 범위·실행 방법·검증은 [서버 README](../../README.md) 참조 |
 | 후속 개발·미검증 | 게임별 GameHandler·Godot 클라이언트·운영 대시보드·운영 부하와 성능 측정 |
 
 여기서 프로세스는 실행 중인 서버 프로그램 하나를 뜻하며, 초기에는 하나로 시작하도록 제안합니다.
@@ -77,7 +77,7 @@ Godot의 `@rpc`나 자동 동기화 기능은 custom Go 서버와 자동으로 �
 
 ## 초기 범위와 제한
 
-- 번호는 6자리 숫자 문자열, 기본 public, 비밀번호 길이 4~64 Unicode 문자를 제안합니다. 세부 흐름은 [02. 룸과 세션](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/02-rooms-and-sessions.md)에 있습니다.
+- 번호는 6자리 숫자 문자열, 기본 public, 비밀번호 길이 4~64 Unicode 문자를 제안합니다. 세부 흐름은 [02. 룸과 세션](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/02-rooms-and-sessions.md)에 있습니다.
 - private는 플레이어 공개 목록에서 제외하고 운영 화면에는 번호·공개 여부를 표시합니다. 비밀번호·hash·salt는 공개 상태와 로그에 넣지 않습니다.
 - 룸 수명 동안 공개 여부·비밀번호를 고정하며 host가 바뀌어도 유지합니다. 비밀번호 변경 기능은 추가하지 않습니다.
 - 자동 재접속 복원은 포함하지 않습니다. 새 guest 연결은 이전 `PLAYING` 룸에 다시 들어갈 수 없습니다.
@@ -108,4 +108,4 @@ CoopDock(코옵독)을 작업 프로젝트명과 `coopdock` 코드 폴더명으�
 - 공개 번호 입장·프라이빗 비밀번호 확인과 운영 인증의 분리를 확인했는가?
 - 설정 주기와 실제 처리 성능을 구분해 측정했는가?
 
-다음: [룸과 세션](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/02-rooms-and-sessions.md) · [전체 원본](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/go-room-server-design.md)
+다음: [룸과 세션](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/02-rooms-and-sessions.md) · [전체 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)

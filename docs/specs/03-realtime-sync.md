@@ -108,4 +108,4 @@ WebSocket이 사용하는 TCP에서 데이터가 손실되면 뒤 데이터도 �
 - 보정에 사용한 상태·tick·입력 번호가 같은 snapshot에 속하는지 확인합니다.
 - 시작·종료 순서 장치와 일회성 이벤트 보존, 실제 tick·전송 주기·화면 지연을 측정합니다.
 
-다음: [메시지와 API](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/specs/04-messages-and-api.md) · [전체 원본](/Users/sangjinsu/Documents/Codex/2026-10-10/gameanvil/outputs/go-room-server-design.md)
+다음: [메시지와 API](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/04-messages-and-api.md) · [전체 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
