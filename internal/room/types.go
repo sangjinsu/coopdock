@@ -55,6 +55,8 @@ type Config struct {
 	TickHz, SnapshotHz, InputQueue, InputsPerTick                         int
 	HandlerFactory                                                        func() game.GameHandler
 	newTicker                                                             func(time.Duration) (<-chan time.Time, func())
+	newOperationsTicker                                                   func(time.Duration) (<-chan time.Time, func())
+	operationsNow                                                         func() time.Time
 	MaxRooms, MaxSessions, NumberRetries                                  int
 	ActorQueue, CleanupQueue, EventQueue, ListLimit                       int
 	HashWorkers, HashQueue                                                int

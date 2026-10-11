@@ -27,7 +27,7 @@ type Manager struct {
 }
 
 func NewManager(c Config) (*Manager, error) {
-	if c.TickHz < 1 || c.TickHz > 120 || c.SnapshotHz < 1 || c.SnapshotHz > c.TickHz || c.InputQueue < 1 || c.InputQueue > 4096 || c.InputsPerTick < 1 || c.InputsPerTick > c.InputQueue || c.MaxRooms < 1 || c.MaxSessions < 1 || c.NumberRetries < 1 || c.ActorQueue < 1 || c.CleanupQueue < 6 || c.EventQueue < 1 || c.ListLimit < 1 || c.HashWorkers < 1 || c.HashQueue < 1 || c.FailureTTL <= 0 || c.IPFailureLimit < 1 || c.SessionFailureLimit < 1 || c.RoomFailureLimit < 1 || c.MaxFailureKeys < 3 || c.RequestTimeout <= 0 || c.ShutdownTimeout <= 0 || c.ArgonThreads < 1 || c.ArgonMemory < 8*uint32(c.ArgonThreads) || c.ArgonTime < 1 || c.SaltBytes < 16 || c.HashBytes < 32 {
+	if c.TickHz < 1 || c.TickHz > 120 || c.SnapshotHz < 1 || c.SnapshotHz > c.TickHz || c.InputQueue < 1 || c.InputQueue > 4096 || c.InputsPerTick < 1 || c.InputsPerTick > c.InputQueue || c.MaxRooms < 1 || c.MaxRooms > 4096 || c.MaxSessions < 1 || c.NumberRetries < 1 || c.ActorQueue < 1 || c.CleanupQueue < 6 || c.EventQueue < 1 || c.ListLimit < 1 || c.HashWorkers < 1 || c.HashQueue < 1 || c.FailureTTL <= 0 || c.IPFailureLimit < 1 || c.SessionFailureLimit < 1 || c.RoomFailureLimit < 1 || c.MaxFailureKeys < 3 || c.RequestTimeout <= 0 || c.ShutdownTimeout <= 0 || c.ArgonThreads < 1 || c.ArgonMemory < 8*uint32(c.ArgonThreads) || c.ArgonTime < 1 || c.SaltBytes < 16 || c.HashBytes < 32 {
 		return nil, failure("INVALID_MESSAGE")
 	}
 	if c.HandlerFactory == nil {
@@ -35,6 +35,12 @@ func NewManager(c Config) (*Manager, error) {
 	}
 	if c.newTicker == nil {
 		c.newTicker = func(d time.Duration) (<-chan time.Time, func()) { t := time.NewTicker(d); return t.C, t.Stop }
+	}
+	if c.newOperationsTicker == nil {
+		c.newOperationsTicker = func(d time.Duration) (<-chan time.Time, func()) { t := time.NewTicker(d); return t.C, t.Stop }
+	}
+	if c.operationsNow == nil {
+		c.operationsNow = time.Now
 	}
 	m := &Manager{cfg: c, rooms: map[string]*actor{}, sessions: map[string]*Session{}, closed: make(chan struct{}), stop: make(chan struct{}), hashJobs: make(chan hashJob, c.HashQueue), limits: newFailureLimits(c)}
 	for i := 0; i < c.HashWorkers; i++ {

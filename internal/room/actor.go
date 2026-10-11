@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"roomserver/internal/game"
+	"sync/atomic"
 	"time"
 )
 
@@ -52,6 +53,9 @@ type actor struct {
 	publicationDepth       int
 	flushingSlow           bool
 	slowMembers            []memberEntry
+	operations             atomic.Pointer[OperationsSummary]
+	operationsTicks        <-chan time.Time
+	stopOperations         func()
 }
 
 func newActor(m *Manager, n string, o CreateOptions, p *credential) *actor {
@@ -124,7 +128,10 @@ func (r *actor) remove(s *Session, roomID string, token uint64) bool {
 	}
 	// Keep canceled receipts, all leave events, and the explicit end in one publication scope.
 	r.publicationDepth++
-	defer r.finishPublication()
+	defer func() {
+		r.finishPublication()
+		r.publishOperations(m.cfg.operationsNow())
+	}()
 	r.cancelInputs(func(in receipt) bool { return in.s == s && in.token == token })
 	if r.handler != nil {
 		out, err := r.handler.OnLeave(s.id)
@@ -285,6 +292,7 @@ func (r *actor) admit(c command) result {
 	if err != nil {
 		return result{err: err}
 	}
+	r.publishOperations(m.cfg.operationsNow())
 	return result{snap: r.snapshot()}
 }
 func (r *actor) handleCleanup(c cleanup) {
@@ -315,6 +323,7 @@ func (r *actor) handleCommand(c command) {
 }
 func (r *actor) run() {
 	defer r.manager.wg.Done()
+	r.operationsTicks, r.stopOperations = r.manager.cfg.newOperationsTicker(time.Second)
 	defer func() {
 		// Registry removal and input admission share the gate, preventing orphan enqueue.
 		m := r.manager
@@ -331,6 +340,7 @@ func (r *actor) run() {
 		}
 		close(r.done)
 	}()
+	defer r.stopOperations()
 	for {
 		// Cleanup and already-ready simulation ticks precede ordinary commands.
 		select {
@@ -348,6 +358,10 @@ func (r *actor) run() {
 					r.tick()
 				case <-r.snapshots:
 					r.publishSnapshot()
+				case <-r.operationsTicks:
+					r.publishOperations(r.manager.cfg.operationsNow())
+					// A heartbeat must not close an unpublished admission reservation.
+					continue
 				case in := <-r.inputs:
 					r.pending = append(r.pending, in)
 				case c := <-r.commands:
@@ -356,6 +370,12 @@ func (r *actor) run() {
 					return
 				}
 			}
+		}
+		// Already-ready simulation ticks cannot starve the independent heartbeat.
+		select {
+		case <-r.operationsTicks:
+			r.publishOperations(r.manager.cfg.operationsNow())
+		default:
 		}
 		if len(r.members) == 0 {
 			return

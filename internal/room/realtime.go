@@ -197,6 +197,7 @@ func (r *actor) start(c command) {
 	v := r.snapshot()
 	c.result <- result{snap: v.clone()}
 	m.mu.Unlock()
+	r.publishOperations(m.cfg.operationsNow())
 	r.ticks, r.stopTick = m.cfg.newTicker(time.Second / time.Duration(m.cfg.TickHz))
 	r.snapshots, r.stopSnapshot = m.cfg.newTicker(time.Second / time.Duration(m.cfg.SnapshotHz))
 	r.broadcastEvent(Event{Op: "game.started", Snapshot: v})
@@ -367,6 +368,7 @@ func (r *actor) endMatch(reason string) {
 	r.cancelInputs(func(receipt) bool { return true })
 	v := r.snapshot()
 	r.broadcastEvent(Event{Op: "game.ended", Snapshot: v, Ended: ended})
+	r.publishOperations(m.cfg.operationsNow())
 }
 func (r *actor) publishSnapshot() {
 	if r.handler == nil {
