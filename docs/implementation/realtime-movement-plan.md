@@ -22,7 +22,7 @@
 - actor만 룸·게임 상태를 변경한다. Manager 잠금 순서 `Manager.mu → Session.mu` 유지; 잠금 아래 handler 호출·channel 대기·socket I/O 금지.
 - PLAYING 신규 입장·재입장은 `ROOM_IN_PROGRESS`. host 퇴장 시 가장 먼저 입장한 잔여 참가자에게 승계; 마지막 퇴장은 룸 제거.
 - guest 재연결은 새 세션이며 자동 복원 없음. 기존 generation·membershipToken·private 검증의 room ID 결합을 보존한다.
-- 코드 주석은 영어, 설명은 한국어. 기존 공식 API 조사 [official-api-research.md](../../work/movement/official-api-research.md)를 먼저 읽는다.
+- 코드 주석은 영어, 설명은 한국어. 기존 공식 API 조사 `work/movement/official-api-research.md`(당시 로컬 조사 기록; 공개 저장소에 포함하지 않음)를 먼저 읽는다.
 - 이번 결과는 free-space reference 이동이다. 지형·충돌·중력·구체 협동 목표·승패·Godot 표시/보간/예측·운영 API/audit를 임의로 추가하지 않는다.
 - 사용자는 실행과 작업별 local commit을 승인했다. 계획 재승인 대기 없이 Task 1→2→3→4 순서로 실행하고 소유 파일만 stage한다. 다른 작업자의 변경을 되돌리지 않는다.
 
@@ -95,9 +95,9 @@
 모든 명령은 repo 루트에서 실행한다. cache 경로는 이 작업 공간에 고정한다.
 
 ```bash
-export GOCACHE=/Users/sangjinsu/Documents/ChatGPT/coopdock/work/go-build
-export GOMODCACHE=/Users/sangjinsu/Documents/ChatGPT/coopdock/work/go-mod
-export GOTMPDIR=/Users/sangjinsu/Documents/ChatGPT/coopdock/work/tmp
+export GOCACHE="$PWD/work/go-build"
+export GOMODCACHE="$PWD/work/go-mod"
+export GOTMPDIR="$PWD/work/tmp"
 export GOTOOLCHAIN=local
 mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOTMPDIR"
 ```

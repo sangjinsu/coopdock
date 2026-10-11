@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- CoopDock(코옵독)을 작업 프로젝트명으로 사용하며 구현 위치는 `/Users/sangjinsu/Documents/ChatGPT/coopdock`이다. Go module 이름 `roomserver`는 내부 module 식별자로 유지한다.
+- CoopDock(코옵독)을 작업 프로젝트명으로 사용하며 구현 위치는 저장소 루트이다. Go module 이름 `roomserver`는 내부 module 식별자로 유지한다.
 - local Go는 `1.27.2 darwin/arm64`로 확인했다. dependency의 최소 요구 버전에 따라 `go.mod`는 Go `1.26.0`을 사용한다.
 - 룸당 정원 `1~6명`, 미지정 기본 `6`; 번호는 ASCII 숫자 `6자리` 문자열이며 선행 0을 유지한다.
 - 기본 공개 여부는 `public`; `private`는 생성자 지정 비밀번호, public 생성에서 password 필드가 있으면 `INVALID_MESSAGE`다.
@@ -79,7 +79,7 @@ export GOCACHE="$PWD/work/go-build"
 export GOMODCACHE="$PWD/work/go-mod"
 export GOTMPDIR="$PWD/work/tmp"
 export GOTOOLCHAIN=local
-cd /Users/sangjinsu/Documents/ChatGPT/coopdock
+# Run these commands from the repository root.
 ```
 
 ## Task 1: 룸 코어와 안전한 private 입장

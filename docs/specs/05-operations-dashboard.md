@@ -1,6 +1,6 @@
 # 05. 운영 대시보드 — 서버 상황을 읽는 화면
 
-[전체 목차](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/README.md) · [상세 설계 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
+[전체 목차](README.md) · [상세 설계 원본](../go-room-server-design.md)
 
 ## 무엇을 위한 화면인가
 
@@ -92,7 +92,7 @@ viewer는 조회 담당, operator는 조작 권한까지 가진 운영자다.
 게임 guest·룸 비밀번호와 운영 인증을 분리하고 API 서버가 매 요청의 권한을 검사한다.
 룸 비밀번호를 안다는 이유로 운영 권한을 얻을 수 없다. 운영 환경에서는 admin 화면·API를 HTTPS로 제공한다.
 화면에서 버튼을 숨기는 것만으로 권한을 제한하지 않는다. GET은 조회에만 사용한다.
-API 목록은 [04. 메시지와 API](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/04-messages-and-api.md), 조작 규칙은 [06. 운영 조작과 종료](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/06-operations-and-shutdown.md)에 있다.
+API 목록은 [04. 메시지와 API](04-messages-and-api.md), 조작 규칙은 [06. 운영 조작과 종료](06-operations-and-shutdown.md)에 있다.
 
 ## 구현 후 확인할 것
 

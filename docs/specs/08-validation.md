@@ -1,11 +1,11 @@
 # 08. 검증 계획 — 어떤 상황에서 무엇을 확인할 것인가
 
-[전체 목차](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/README.md) · [상세 설계 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
+[전체 목차](README.md) · [상세 설계 원본](../go-room-server-design.md)
 
 ## 이 문서의 목적
 
 **코드 구현 후 플레이어와 운영자가 기대한 결과를 얻는지 확인하는 계획이다.**
-현재 구현·테스트 통과·성능 측정 결과를 보고하는 문서가 아니다. 구현된 Go reference와 실행 검증은 [README](../../README.md), 작업별 증거는 [구현 계획](../implementation/realtime-movement-plan.md)과 작업 보고서를 참조한다. 실제 6 WS는 서버 checker 검증이며 Godot QA가 아니다.
+현재 구현·테스트 통과·성능 측정 결과를 보고하는 문서가 아니다. 구현된 Go reference와 실행 검증은 [서버 가이드](../server-guide.md), 작업별 증거는 [구현 계획](../implementation/realtime-movement-plan.md)과 작업 보고서를 참조한다. 실제 6 WS는 서버 checker 검증이며 Godot QA가 아니다.
 룸당 1~6명은 요구 범위지만 전체 동시 룸 수와 서버 수용 인원은 아직 측정하지 않았다.
 
 예를 들어 6명 룸에 마지막 한 자리가 남았을 때 두 사람이 동시에 입장할 수 있다.
@@ -108,4 +108,4 @@ RTT는 왕복 시간이며 화면 지연을 대신하지 않는다. 클라이언
 
 `go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...`, `go build ./...`로 Go 실행 경로를 검증한다. 실행 결과는 작업 보고서에 기록한다. deterministic queue/ticker·writer barrier는 내부 순서·경합 시험이며 실제 TCP 손실·jitter 주입 시험은 아니다. 게임별 충돌·승패·Godot QA·운영 부하·UI 지연은 후속이며 미측정이다.
 race 검사 통과와 위 상황 시험, 실제 게임 판정·성능 측정 결과를 함께 기록해야 완료 근거가 된다.
-구현 순서는 [07. 구현 순서와 설정](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/07-implementation-and-config.md)을 따른다.
+구현 순서는 [07. 구현 순서와 설정](07-implementation-and-config.md)을 따른다.

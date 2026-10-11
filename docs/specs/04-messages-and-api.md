@@ -4,7 +4,7 @@
 프로토콜은 서로 어떤 형식과 순서로 데이터를 주고받을지 정한 약속입니다.
 
 Godot 활용은 확정 요구사항입니다. 연결은 custom WebSocket + JSON으로 제안하며 전용 SDK는 필수가 아닙니다.
-아래 version 1 메시지와 API 경로는 **초기 설계 계약**입니다. 현재 서버에서 제공하는 메시지·경로와 검증 범위는 [서버 README](../../README.md)를 참조하세요. Godot 클라이언트와 운영 API는 후속 구현 범위입니다.
+아래 version 1 메시지와 API 경로는 **초기 설계 계약**입니다. 현재 서버에서 제공하는 메시지·경로와 검증 범위는 [서버 가이드](../server-guide.md)를 참조하세요. Godot 클라이언트와 운영 API는 후속 구현 범위입니다.
 
 ## 두 사람이 서버와 이야기하는 예
 
@@ -147,7 +147,7 @@ membership을 유지하는 동안 다음 판마다 재입력하지 않으며, �
 | `last_processed_input_seq` | `session_id → 실제 적용 완료 입력 번호` map |
 
 `input_seq`는 세션 수명 동안 증가하며 새 match에도 유지합니다. `server_tick`은 새 match마다 시작합니다.
-상태·tick·적용 번호를 같은 시점에 캡처합니다. 예측 보정은 [동기화 문서](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/03-realtime-sync.md)의 순서를 따릅니다.
+상태·tick·적용 번호를 같은 시점에 캡처합니다. 예측 보정은 [동기화 문서](03-realtime-sync.md)의 순서를 따릅니다.
 `room.state`는 revision으로 처리하고, 오래된 snapshot·종료된 match 필터는 `game.snapshot`의 게임 상태에 적용합니다.
 이 필터로 퇴장·종료 메타데이터나 중요한 입장·시작 초기 snapshot을 버리지 않습니다.
 현재 reference 공개 상태는 모든 참가자에게 공통입니다. 비공개 정보가 필요한 게임은 후속 handler 계약 확장이 필요합니다. players와 members는 살아 있는 참가자의 입장 순서입니다. full capture마다 snapshot_seq가 증가하며 하나의 capture를 response/event에 재사용하면 같은 번호입니다. idle tick의 revision은 유지합니다.
@@ -180,7 +180,7 @@ GET은 조회 또는 연결 진입이며 상태 변경용으로 사용하지 않
 
 `202 Accepted + command_id`는 **접수**입니다. 실행 성공은 명령 GET의 실제 결과로 확인합니다.
 운영 POST는 현재 `server_instance_id`와 idempotency key, 즉 중복 요청을 구분할 표식을 사용합니다.
-실행 전 접수 audit 저장과 명령 등록이 성공해야 202를 반환합니다. 상세 규칙은 [운영 조작과 종료](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/06-operations-and-shutdown.md)에 있습니다.
+실행 전 접수 audit 저장과 명령 등록이 성공해야 202를 반환합니다. 상세 규칙은 [운영 조작과 종료](06-operations-and-shutdown.md)에 있습니다.
 guest 연결·룸 비밀번호와 운영 인증은 분리합니다. viewer는 조회, operator는 조작이며 서버가 권한을 검사합니다.
 운영 대상의 `{id}`는 사용자 입력 번호가 아닌 고정 내부 `room_id`입니다.
 cookie로 인증한 변경 요청에는 CSRF 방어와 Origin 검증이 필요합니다. [OWASP 지침](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
@@ -206,4 +206,4 @@ Godot `@rpc`·자동 동기화는 custom Go JSON 계약과 자동 호환되지 �
 번호 앞 0 보존·비밀번호 누락/오류·재요청과 비밀정보 없는 응답/로그도 확인합니다.
 운영 202와 실제 결과를 구분하고, GET으로 상태를 변경하지 않는지도 확인합니다.
 
-다음: [운영 대시보드](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/05-operations-dashboard.md) · [전체 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
+다음: [운영 대시보드](05-operations-dashboard.md) · [전체 원본](../go-room-server-design.md)

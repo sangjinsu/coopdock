@@ -5,7 +5,7 @@
 
 확정 요구사항은 **룸당 1~6명, 번호로 입장, 프라이빗 비밀번호 확인**입니다.
 번호 6자리·기본 공개·비밀번호 길이 등 세부값과 아래 상태·퇴장 규칙은 **초기 설계 제안**입니다.
-이 문서는 목표 설계입니다. 현재 연결·룸 관리 구현과 검증 범위는 [서버 README](../../README.md)를 참조하세요.
+이 문서는 목표 설계입니다. 현재 연결·룸 관리 구현과 검증 범위는 [서버 가이드](../server-guide.md)를 참조하세요.
 
 ## 먼저 알아둘 신분
 
@@ -149,7 +149,7 @@ kick은 운영자가 참가자의 현재 입장을 종료하는 명령입니다.
 지연이 룸 A를 떠나 룸 B로 옮겼는데, 늦은 룸 A의 kick이 도착할 수 있습니다.
 서버는 **내부 `room_id`와 membership 식별자**를 현재 값과 대조합니다. 사용자 입력 번호를 운영 명령 대상으로 대신하지 않습니다.
 전역 session ID만 보고 룸 B에 있는 연결을 닫지 않습니다.
-실제 조작 결과는 [운영 조작 문서](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/06-operations-and-shutdown.md)에서 확인합니다.
+실제 조작 결과는 [운영 조작 문서](06-operations-and-shutdown.md)에서 확인합니다.
 
 ## 구현 후 확인할 기준
 
@@ -163,4 +163,4 @@ kick은 운영자가 참가자의 현재 입장을 종료하는 명령입니다.
 - `PLAYING` 재입장을 거부하며 게임 종료 후 입장은 새 참가자로 처리하는가?
 - 예전 룸의 kick이 다른 룸으로 옮긴 세션을 닫지 않는가?
 
-다음: [실시간 동기화](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/03-realtime-sync.md) · [전체 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
+다음: [실시간 동기화](03-realtime-sync.md) · [전체 원본](../go-room-server-design.md)

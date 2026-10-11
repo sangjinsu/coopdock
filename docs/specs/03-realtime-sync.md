@@ -4,7 +4,7 @@
 각 참가자 화면이 서버의 같은 게임 결과를 따라가도록 하는 것이 이 기능의 목적입니다.
 
 확정 요구사항은 **1~6명의 실시간 이동·협동**입니다.
-Go reference 3D 이동과 서버 동기화는 구현했으며 실행 검증은 [README](../../README.md)를 참조합니다. 30Hz·15Hz는 구현의 기본 시작값이며 성능·실제 도착 지연은 미측정입니다. Godot 표시·보간·예측은 후속 구현입니다.
+Go reference 3D 이동과 서버 동기화는 구현했으며 실행 검증은 [서버 가이드](../server-guide.md)를 참조합니다. 30Hz·15Hz는 구현의 기본 시작값이며 성능·실제 도착 지연은 미측정입니다. Godot 표시·보간·예측은 후속 구현입니다.
 
 ## 계산·전송·화면 표시는 다름
 
@@ -101,7 +101,7 @@ create/join 응답은 초기 full 상태를 `payload.snapshot`에 담고 중요 
 
 현재 `move` 방향은 x/y/z 필수 finite numeric scalar `[-1,1]`이며 길이가 1을 넘으면 정규화합니다. 속도는 방향 × 5 world units/s, 입력이 없어도 유지하고 `(0,0,0)`으로 정지합니다. 입장 순서 index i는 `(2*i,0,0)`에 spawn합니다. 한 tick의 FIFO 방향 setter들을 적용한 뒤 `dt=1/TickHz`로 한 번 계산합니다. 입력마다 dt를 적분하지 않습니다. 놓친 ticker 신호를 catch-up하지 않아 부하 중 simulation은 wall time보다 느려질 수 있습니다.
 
-서버 실행과 실제 6 WS checker는 [README](../../README.md)를 참조합니다. checker는 move seq1 ACK, 양의 Z·불변 X/Y·속도 5, stop seq2 ACK 뒤 위치 유지와 동일 capture key `(match_id,revision,server_tick,snapshot_seq)`의 full 상태를 비교합니다. 서버 TickHz를 추측하지 않습니다. 정상 종료는 handler EndReason 경로이고 reference 자동 종료 조건은 없습니다. test handler로 종료·다음 match를 검사합니다. deterministic barrier는 전송 순서와 bounded queue 경합 시험이며 TCP 손실·jitter 주입 시험은 아닙니다. Godot QA와 부하·화면 지연은 미측정입니다.
+서버 실행과 실제 6 WS checker는 [서버 가이드](../server-guide.md)를 참조합니다. checker는 move seq1 ACK, 양의 Z·불변 X/Y·속도 5, stop seq2 ACK 뒤 위치 유지와 동일 capture key `(match_id,revision,server_tick,snapshot_seq)`의 full 상태를 비교합니다. 서버 TickHz를 추측하지 않습니다. 정상 종료는 handler EndReason 경로이고 reference 자동 종료 조건은 없습니다. test handler로 종료·다음 match를 검사합니다. deterministic barrier는 전송 순서와 bounded queue 경합 시험이며 TCP 손실·jitter 주입 시험은 아닙니다. Godot QA와 부하·화면 지연은 미측정입니다.
 
 ## WebSocket의 한계와 후속 확인
 
@@ -114,4 +114,4 @@ WebSocket이 사용하는 TCP에서 데이터가 손실되면 뒤 데이터도 �
 - 보정에 사용한 상태·tick·입력 번호가 같은 snapshot에 속하는지 확인합니다.
 - 시작·종료 순서 장치와 일회성 이벤트 보존, 실제 tick·전송 주기·화면 지연을 측정합니다.
 
-다음: [메시지와 API](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/04-messages-and-api.md) · [전체 원본](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/go-room-server-design.md)
+다음: [메시지와 API](04-messages-and-api.md) · [전체 원본](../go-room-server-design.md)
