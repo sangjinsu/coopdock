@@ -4,7 +4,7 @@
 각 참가자 화면이 서버의 같은 게임 결과를 따라가도록 하는 것이 이 기능의 목적입니다.
 
 확정 요구사항은 **1~6명의 실시간 이동·협동**입니다.
-아래 통신·표시 방법과 30Hz·15Hz는 **초기 설계 제안**이며 구현·측정하지 않았습니다.
+Go reference 3D 이동과 서버 동기화는 구현했으며 실행 검증은 [README](../../README.md)를 참조합니다. 30Hz·15Hz는 구현의 기본 시작값이며 성능·실제 도착 지연은 미측정입니다. Godot 표시·보간·예측은 후속 구현입니다.
 
 ## 계산·전송·화면 표시는 다름
 
@@ -26,7 +26,7 @@ Hz는 1초에 몇 번 일어나는지, FPS는 화면이 1초에 몇 번 그려�
 
 민수와 지연이 같은 룸에서 장애물을 피해 이동합니다.
 민수는 “오른쪽으로 이동”을 보내고, 지연은 “앞으로 이동”을 보냅니다.
-서버는 각 입력을 순서대로 검사하고 고정 tick에서 적용해 충돌 여부와 실제 위치를 결정합니다.
+서버는 각 입력을 순서대로 검사하고 고정 tick에서 적용해 실제 위치를 결정합니다. 현재 reference는 free-space 3D 이동이며 장애물·충돌·협동 목표는 게임별 후속 규칙입니다.
 다음 전송 주기에 두 사람의 결과를 같은 시점의 전체 상태로 묶어 보냅니다.
 
 ```text
@@ -43,7 +43,7 @@ Hz는 1초에 몇 번 일어나는지, FPS는 화면이 1초에 몇 번 그려�
 
 FIFO는 먼저 들어온 입력을 먼저 처리하는 대기열입니다.
 초기 설계는 이동 입력과 일회성 버튼 행동을 **모두 FIFO**로 처리합니다.
-각 승인 입력을 실제 적용한 뒤 성공 ACK, 즉 처리 완료 확인 응답을 보냅니다.
+각 승인 입력을 Apply하고 해당 tick 계산이 성공한 뒤 성공 ACK, 즉 처리 완료 확인 응답을 보냅니다. ACK는 지속 방향이 해당 tick에 반영됐다는 뜻이며 특정 이동 거리 보장은 아닙니다.
 대기열에 들어갔다는 사실이나 입장 예약만으로 성공 ACK를 보내지 않습니다.
 
 게임 시작·종료 때 미적용 입력을 정리합니다. 적용 직전에도 현재 게임인지 다시 확인합니다.
@@ -88,7 +88,7 @@ Go의 이동·충돌 계산과 Godot의 예측 규칙이 맞아야 합니다. �
 create/join 응답은 초기 full 상태를 `payload.snapshot`에 담고 중요 FIFO에 먼저 넣습니다.
 룸 metadata에는 내부 `room_id`·사용자 입력 `room_number`·`visibility`를 담으며 password·hash·salt는 넣지 않습니다.
 그 응답이 보내지기 전에는 해당 연결의 후속 snapshot을 먼저 보내지 않습니다.
-`game.started`에도 초기 full 상태를 넣어 새 판의 시작 기준을 전달합니다.
+`game.started.payload.snapshot`에도 초기 full 상태를 넣어 새 판의 시작 기준을 전달합니다.
 
 시작·종료 때 이전 최신 snapshot을 폐기하고 중요 이벤트와 `room.state`를 순서대로 전달합니다.
 이미 쓰기 중이던 이전 snapshot은 그 중요 이벤트보다 먼저 마칩니다.
@@ -97,7 +97,13 @@ create/join 응답은 초기 full 상태를 `payload.snapshot`에 담고 중요 
 아직 보내지 않은 full snapshot은 최신 것으로 교체할 수 있어 `snapshot_seq` 중간 누락은 정상입니다.
 일회성 `game.event`와 요청 응답은 중요 FIFO로 보존합니다. 최신 snapshot 슬롯이 이를 대신하지 않습니다.
 
-## WebSocket의 한계와 구현 후 확인
+## 현재 reference의 계산과 검증 경계
+
+현재 `move` 방향은 x/y/z 필수 finite numeric scalar `[-1,1]`이며 길이가 1을 넘으면 정규화합니다. 속도는 방향 × 5 world units/s, 입력이 없어도 유지하고 `(0,0,0)`으로 정지합니다. 입장 순서 index i는 `(2*i,0,0)`에 spawn합니다. 한 tick의 FIFO 방향 setter들을 적용한 뒤 `dt=1/TickHz`로 한 번 계산합니다. 입력마다 dt를 적분하지 않습니다. 놓친 ticker 신호를 catch-up하지 않아 부하 중 simulation은 wall time보다 느려질 수 있습니다.
+
+서버 실행과 실제 6 WS checker는 [README](../../README.md)를 참조합니다. checker는 move seq1 ACK, 양의 Z·불변 X/Y·속도 5, stop seq2 ACK 뒤 위치 유지와 동일 capture key `(match_id,revision,server_tick,snapshot_seq)`의 full 상태를 비교합니다. 서버 TickHz를 추측하지 않습니다. 정상 종료는 handler EndReason 경로이고 reference 자동 종료 조건은 없습니다. test handler로 종료·다음 match를 검사합니다. deterministic barrier는 전송 순서와 bounded queue 경합 시험이며 TCP 손실·jitter 주입 시험은 아닙니다. Godot QA와 부하·화면 지연은 미측정입니다.
+
+## WebSocket의 한계와 후속 확인
 
 WebSocket이 사용하는 TCP에서 데이터가 손실되면 뒤 데이터도 순서를 기다릴 수 있습니다.
 최신 snapshot 교체는 이미 전송 중인 TCP 데이터의 지연까지 없애지 못합니다.

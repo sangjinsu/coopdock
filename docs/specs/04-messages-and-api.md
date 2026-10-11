@@ -100,14 +100,16 @@ membership을 유지하는 동안 다음 판마다 재입력하지 않으며, �
   "payload": {
     "match_id": "match-7",
     "input_seq": 42,
-    "action": {"type": "move", "direction": {"x": 1, "y": 0}}
+    "action": {"type": "move", "direction": {"x": 1, "y": 0, "z": 0}}
   },
   "error": null
 }
 ```
 
 예시는 유효한 JSON의 설계 예시입니다. 존재하는 룸·match나 현재 제공되는 API를 뜻하지 않습니다.
-이동 의도의 구체적인 종류와 검증 규칙은 후속 `GameHandler` 구현에서 정합니다.
+현재 reference는 `move` 지속 방향을 구현합니다. x/y/z는 모두 필수 finite numeric scalar `[-1,1]`이며 길이 1 초과는 정규화, 이하이면 크기를 보존합니다. `(0,0,0)`은 정지이고 속도는 방향 × 5 world units/s입니다. position/speed/dt/timestamp나 미정의 필드는 거절합니다. `input_seq`는 JSON 정수 1~9007199254740991이며 gap은 허용하고 성공 적용 완료 번호 이하의 중복·역순은 거절합니다. 실패 번호는 더 큰 번호가 아직 적용되지 않았다면 재사용할 수 있습니다.
+
+`room.start`는 host가 WAITING에서 `{}`로 요청하며 성공 응답 `payload.snapshot`을 먼저 보냅니다. 이어 `game.started.payload.snapshot` full 상태와 같은 `room.state.payload`가 옵니다. `game.action` 성공 `payload`는 `{"match_id":"match-7","input_seq":42,"server_tick":1}`이며 Apply와 tick 계산이 성공한 뒤 보냅니다. `game.ended.payload`는 `{"match_id":"old-match","reason":"handler reason","server_tick":42,"snapshot":waitingFullState}` 구조이고 다음 `room.state`도 같은 WAITING 상태를 씁니다. 정상 종료는 handler EndReason 경로이며 reference에는 자동 종료·승패 조건이 없습니다. client `room.end` op는 제공하지 않습니다.
 
 ## 게임 메시지 목록
 
@@ -130,7 +132,7 @@ membership을 유지하는 동안 다음 판마다 재입력하지 않으며, �
 ## 전체 상태에 담는 필드
 
 `room.state.payload`와 `game.snapshot.payload`는 아래 상태 구조를 사용합니다.
-성공한 create/join의 `payload.snapshot`, `game.started.payload.snapshot`에는 초기 full 상태를 담습니다.
+성공한 create/join/start의 `payload.snapshot`, `game.started.payload.snapshot`에는 초기 full 상태를 담습니다.
 
 | 필드 | 뜻 |
 |---|---|
@@ -139,7 +141,7 @@ membership을 유지하는 동안 다음 판마다 재입력하지 않으며, �
 | `phase` / `host_id` | `WAITING`·`PLAYING`·`CLOSED` / 현재 방장 |
 | `members` | 입장 순서로 정렬한 참가자 |
 | `revision` | 룸·게임 상태가 변경된 버전 |
-| `game_state` | 게임 규칙이 만든 공개 상태. GameHandler가 없으면 `null` |
+| `game_state` | PLAYING reference는 `players` 배열(각 session_id·position x/y/z·velocity x/y/z), WAITING은 `null` |
 | `server_tick` | 해당 match에서 실제 계산한 단계 번호 |
 | `snapshot_seq` | 룸 수명 동안 증가하는 전체 상태 순번. 새 match에도 유지 |
 | `last_processed_input_seq` | `session_id → 실제 적용 완료 입력 번호` map |
@@ -148,7 +150,7 @@ membership을 유지하는 동안 다음 판마다 재입력하지 않으며, �
 상태·tick·적용 번호를 같은 시점에 캡처합니다. 예측 보정은 [동기화 문서](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/03-realtime-sync.md)의 순서를 따릅니다.
 `room.state`는 revision으로 처리하고, 오래된 snapshot·종료된 match 필터는 `game.snapshot`의 게임 상태에 적용합니다.
 이 필터로 퇴장·종료 메타데이터나 중요한 입장·시작 초기 snapshot을 버리지 않습니다.
-비공개 정보가 있는 게임은 GameHandler가 참가자별 공개 상태를 만듭니다.
+현재 reference 공개 상태는 모든 참가자에게 공통입니다. 비공개 정보가 필요한 게임은 후속 handler 계약 확장이 필요합니다. players와 members는 살아 있는 참가자의 입장 순서입니다. full capture마다 snapshot_seq가 증가하며 하나의 capture를 response/event에 재사용하면 같은 번호입니다. idle tick의 revision은 유지합니다.
 password·hash·salt는 생성/입장 응답·`room.state`·`game.snapshot`에 넣지 않습니다.
 운영 summary·cache·로그·audit에도 포함하지 않으며 요청 전체 payload를 기록하지 않습니다.
 운영 환경의 게임 연결은 WSS, admin 화면·API는 HTTPS를 사용합니다. [OWASP WebSocket 보안 지침](https://cheatsheetseries.owasp.org/cheatsheets/WebSocket_Security_Cheat_Sheet.html)
@@ -193,6 +195,9 @@ cookie로 인증한 변경 요청에는 CSRF 방어와 Origin 검증이 필요�
 | `NOT_HOST` / `INVALID_MESSAGE` | 시작 권한 없음 / 메시지 형식·내용이 잘못됨 |
 | `PASSWORD_REQUIRED` | private 입장에 비밀번호 필요. 입력받아 같은 번호로 재요청 |
 | `PASSWORD_INVALID` | private 비밀번호 불일치 |
+| `GAME_NOT_STARTED` / `STALE_MATCH` | 아직 시작 안 됨 / 현재 match와 다른 입력 |
+| `INVALID_INPUT_SEQ` | 번호 범위·중복·역순 오류 |
+| `INPUT_CANCELED` / `GAME_ERROR` | 퇴장·종료로 미적용 입력 취소 / handler 오류 |
 | `RATE_LIMITED` | 실패 시도 제한 중. 설정한 제한 시간이 지난 뒤 재시도 |
 | `SERVER_BUSY` | 대기열·hash worker·번호 확보 재시도 등 서버 처리 한계에 도달 |
 

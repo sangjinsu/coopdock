@@ -36,6 +36,7 @@ func Load() (Config, error) {
 		p        *int
 		min, max int
 	}{
+		{"ROOM_TICK_HZ", &c.Room.TickHz, 1, 120}, {"ROOM_SNAPSHOT_HZ", &c.Room.SnapshotHz, 1, 120}, {"ROOM_INPUT_QUEUE", &c.Room.InputQueue, 1, 4096}, {"ROOM_INPUTS_PER_TICK", &c.Room.InputsPerTick, 1, 4096},
 		{"ROOM_MAX_ROOMS", &c.Room.MaxRooms, 1, 4096}, {"ROOM_MAX_SESSIONS", &c.Room.MaxSessions, 1, 24576}, {"ROOM_NUMBER_RETRIES", &c.Room.NumberRetries, 1, 1024}, {"ROOM_ACTOR_QUEUE", &c.Room.ActorQueue, 1, 4096}, {"ROOM_CLEANUP_QUEUE", &c.Room.CleanupQueue, 6, 4096}, {"ROOM_EVENT_QUEUE", &c.Room.EventQueue, 1, 4096}, {"ROOM_LIST_LIMIT", &c.Room.ListLimit, 1, 1000}, {"ROOM_HASH_WORKERS", &c.Room.HashWorkers, 1, 16}, {"ROOM_HASH_QUEUE", &c.Room.HashQueue, 1, 256}, {"ROOM_IP_FAILURE_LIMIT", &c.Room.IPFailureLimit, 1, 10000}, {"ROOM_SESSION_FAILURE_LIMIT", &c.Room.SessionFailureLimit, 1, 10000}, {"ROOM_ROOM_FAILURE_LIMIT", &c.Room.RoomFailureLimit, 1, 10000}, {"ROOM_MAX_FAILURE_KEYS", &c.Room.MaxFailureKeys, 3, 65536}, {"WS_INGRESS_QUEUE", &c.Transport.IngressQueue, 1, 4096}, {"WS_OUTBOUND_QUEUE", &c.Transport.OutboundQueue, 1, 4096},
 	}
 	for _, v := range ints {
@@ -46,6 +47,12 @@ func Load() (Config, error) {
 			}
 			*v.p = n
 		}
+	}
+	if c.Room.SnapshotHz > c.Room.TickHz {
+		return c, fmt.Errorf("Invalid ROOM_SNAPSHOT_HZ.")
+	}
+	if c.Room.InputsPerTick > c.Room.InputQueue {
+		return c, fmt.Errorf("Invalid ROOM_INPUTS_PER_TICK.")
 	}
 	if s, ok := os.LookupEnv("WS_MESSAGE_BYTES"); ok {
 		n, e := strconv.ParseInt(s, 10, 64)

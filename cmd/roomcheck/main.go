@@ -1,4 +1,4 @@
-// roomcheck asserts room entry against an already running WebSocket server.
+// roomcheck asserts room entry and movement against a running WebSocket server.
 package main
 
 import (
@@ -22,14 +22,16 @@ type reply struct {
 	Error   *protocol.Error `json:"error"`
 }
 type checkClient struct {
-	conn     *websocket.Conn
-	sequence int
+	conn      *websocket.Conn
+	sequence  int
+	sessionID string
 }
 
 func main() {
 	url := flag.String("url", "ws://127.0.0.1:8080/ws", "검증할 WebSocket URL")
 	runs := flag.Int("race-runs", 3, "마지막 자리 동시 입장 반복 횟수 (1~100)")
 	timeout := flag.Duration("timeout", 30*time.Second, "전체 검증 제한 시간")
+	movement := flag.Bool("movement", true, "6클라이언트 실시간 이동 검증")
 	flag.Parse()
 	if *runs < 1 || *runs > 100 || *timeout <= 0 {
 		fmt.Fprintln(os.Stderr, "검증 옵션이 잘못되었습니다.")
@@ -42,6 +44,13 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("PASS: public/private 6인·7번째 거절, private 비밀번호 순서·목록 제외, 마지막 자리 race %d회\n", *runs)
+	if *movement {
+		if e := runMovementChecks(ctx, *url); e != nil {
+			fmt.Fprintln(os.Stderr, "이동 검증 실패:", e)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: 6 WS 동일 capture·3D 이동·실제 ACK·정지 유지·빈 룸 정리")
+	}
 }
 func connect(ctx context.Context, url string) (*checkClient, error) {
 	c, _, e := websocket.Dial(ctx, url, nil)
@@ -61,6 +70,7 @@ func connect(ctx context.Context, url string) (*checkClient, error) {
 		c.CloseNow()
 		return nil, errors.New("guest ID 없음.")
 	}
+	v.sessionID = p.ID
 	return v, nil
 }
 func (c *checkClient) read(ctx context.Context) (reply, error) {

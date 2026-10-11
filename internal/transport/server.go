@@ -308,7 +308,7 @@ func (p *peer) processEvent(event room.Event) bool {
 			return true
 		}
 		p.rememberStart(state)
-		return p.enqueueBatch(true, protocol.Event("game.started", state), protocol.Event("room.state", state))
+		return p.enqueueBatch(true, protocol.Event("game.started", map[string]any{"snapshot": state}), protocol.Event("room.state", state))
 	case "game.ended":
 		if state.RoomID != p.roomID || event.Ended == nil || event.Ended.MatchID != p.activeMatch {
 			return true
@@ -430,7 +430,7 @@ func (p *peer) processor() {
 				}
 			case "room.start":
 				p.rememberStart(state)
-				if !p.enqueueBatch(true, response, protocol.Event("game.started", state), protocol.Event("room.state", state)) {
+				if !p.enqueueBatch(true, response, protocol.Event("game.started", map[string]any{"snapshot": state}), protocol.Event("room.state", state)) {
 					return
 				}
 			case "room.leave":

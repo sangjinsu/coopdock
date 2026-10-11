@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/coder/websocket"
 	"net/http/httptest"
+	"reflect"
 	"roomserver/internal/game"
 	"roomserver/internal/protocol"
 	"roomserver/internal/room"
@@ -26,6 +27,47 @@ func sendID(t *testing.T, c *client, op, id string, payload any) {
 func actionPayload(match string, seq uint64, x, z float64) any {
 	return map[string]any{"match_id": match, "input_seq": seq, "action": map[string]any{"type": "move", "direction": map[string]float64{"x": x, "y": 0, "z": z}}}
 }
+
+func startedSnapshot(t *testing.T, payload json.RawMessage) room.Snapshot {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	var state room.Snapshot
+	if json.Unmarshal(payload, &fields) != nil || len(fields) != 1 || json.Unmarshal(fields["snapshot"], &state) != nil || state.MatchID == nil {
+		t.Fatal("game.started must contain a full payload.snapshot")
+	}
+	return state
+}
+
+// Both self-start and another member's event use the source-spec wrapper.
+func TestGameStartedPayloadSnapshot(t *testing.T) {
+	_, _, _, dial := setup(t, DefaultConfig())
+	h, c := dial(), dial()
+	created := snapshot(t, h.success("room.create", map[string]any{}))
+	h.read()
+	c.success("room.join", map[string]any{"room_number": created.RoomNumber})
+	c.read()
+	h.read()
+	h.send("room.start", map[string]any{})
+	response := h.read()
+	if response.Op != "room.start" || response.Error != nil {
+		t.Fatalf("start response: %+v", response)
+	}
+	want := snapshot(t, response)
+	for _, client := range []*client{h, c} {
+		event := client.read()
+		if event.Op != "game.started" || event.ID != nil {
+			t.Fatalf("start event: %+v", event)
+		}
+		if got := startedSnapshot(t, event.Payload); !reflect.DeepEqual(got, want) {
+			t.Fatal("started capture differs from response")
+		}
+		paired := client.read()
+		var got room.Snapshot
+		if paired.Op != "room.state" || json.Unmarshal(paired.Payload, &got) != nil || !reflect.DeepEqual(got, want) {
+			t.Fatal("paired room.state capture differs")
+		}
+	}
+}
 func assertStart(t *testing.T, c *client) room.Snapshot {
 	t.Helper()
 	c.send("room.start", map[string]any{})
@@ -40,7 +82,12 @@ func assertStart(t *testing.T, c *client) room.Snapshot {
 	for _, op := range []string{"game.started", "room.state"} {
 		f := c.read()
 		var state room.Snapshot
-		if f.Op != op || f.ID != nil || json.Unmarshal(f.Payload, &state) != nil || state.SnapshotSeq != v.SnapshotSeq {
+		if op == "game.started" {
+			state = startedSnapshot(t, f.Payload)
+		} else if json.Unmarshal(f.Payload, &state) != nil {
+			t.Fatal("room.state decode")
+		}
+		if f.Op != op || f.ID != nil || state.SnapshotSeq != v.SnapshotSeq {
 			t.Fatalf("start batch: %+v", f)
 		}
 	}
@@ -367,7 +414,12 @@ func TestInitialAndLifecycleFences(t *testing.T) {
 		}
 		for _, op := range []string{"game.started", "room.state"} {
 			f = c.read()
-			if f.Op != op || json.Unmarshal(f.Payload, &state) != nil || state.MatchID == nil || *state.MatchID != *started.MatchID {
+			if op == "game.started" {
+				state = startedSnapshot(t, f.Payload)
+			} else if json.Unmarshal(f.Payload, &state) != nil {
+				t.Fatal("room.state decode")
+			}
+			if f.Op != op || state.MatchID == nil || *state.MatchID != *started.MatchID {
 				t.Fatal("queued start lifecycle")
 			}
 		}

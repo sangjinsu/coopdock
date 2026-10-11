@@ -5,7 +5,7 @@
 ## 이 문서의 목적
 
 **코드 구현 후 플레이어와 운영자가 기대한 결과를 얻는지 확인하는 계획이다.**
-현재 구현·테스트 통과·성능 측정 결과를 보고하는 문서가 아니다.
+현재 구현·테스트 통과·성능 측정 결과를 보고하는 문서가 아니다. 구현된 Go reference와 실행 검증은 [README](../../README.md), 작업별 증거는 [구현 계획](../implementation/realtime-movement-plan.md)과 작업 보고서를 참조한다. 실제 6 WS는 서버 checker 검증이며 Godot QA가 아니다.
 룸당 1~6명은 요구 범위지만 전체 동시 룸 수와 서버 수용 인원은 아직 측정하지 않았다.
 
 예를 들어 6명 룸에 마지막 한 자리가 남았을 때 두 사람이 동시에 입장할 수 있다.
@@ -60,7 +60,7 @@ snapshot은 전체 상태 메시지, tick은 계산 단계, match는 한 번의 
 | 한 클라이언트가 거의 읽지 않음 | 중요 FIFO 포화 시 해당 연결을 닫고 정리하며 다른 룸 진행 영향을 측정한다. |
 
 jitter는 전송 지연이 일정하지 않고 흔들리는 현상이다.
-상태 비교는 같은 match의 같은 revision·tick을 기준으로 한다. revision은 상태 변경 버전이다.
+상태 비교는 동일 `(match_id,revision,server_tick,snapshot_seq)` capture를 기준으로 한다. 실제 checker는 여섯 full 상태·member 순서·참가자 seq map을 비교하고 각 참가자의 seq1 이동 ACK, 양의 Z·불변 X/Y·속도 5, seq2 정지 ACK 뒤 추가 snapshot의 위치 유지를 검증한다. 서버 tickHz는 추측하지 않는다. revision은 상태 변경 버전이다.
 숨겨진 정보가 있으면 참가자 전체에 공통으로 공개된 부분만 비교한다.
 실제 이동·충돌·협동 성공 여부는 GameHandler 규칙과 비교한다. 같은 메시지를 받는 것만으로 판정하지 않는다.
 보간·예측을 추가하면 Godot 표시와 서버 판정의 보정 동작도 후속으로 시험한다.
@@ -106,6 +106,6 @@ HTTP 종료만으로 WebSocket이 정리됐다고 판단하지 않는다. [Serve
 RTT는 왕복 시간이며 화면 지연을 대신하지 않는다. 클라이언트 시계와 서버 시각을 단순히 빼지 않는다.
 화면 도착·표시 지연은 클라이언트 계측이 있어야 측정한다. 임의의 절대 지연·메모리 합격 수치를 만들지 않는다.
 
-구현 후 `go test -race ./...`로 공유 상태의 데이터 경합을 검사한다. 현재는 실행하지 않았다.
+`go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...`, `go build ./...`로 Go 실행 경로를 검증한다. 실행 결과는 작업 보고서에 기록한다. deterministic queue/ticker·writer barrier는 내부 순서·경합 시험이며 실제 TCP 손실·jitter 주입 시험은 아니다. 게임별 충돌·승패·Godot QA·운영 부하·UI 지연은 후속이며 미측정이다.
 race 검사 통과와 위 상황 시험, 실제 게임 판정·성능 측정 결과를 함께 기록해야 완료 근거가 된다.
 구현 순서는 [07. 구현 순서와 설정](/Users/sangjinsu/Documents/ChatGPT/coopdock/docs/specs/07-implementation-and-config.md)을 따른다.

@@ -73,7 +73,7 @@
 
 - `capture()`는 actor 안에서 현재 state·tick·seq map을 함께 복사하며 **full 상태를 새로 캡처할 때마다** room `snapshot_seq`를 1 증가시킨다. create/join/start/end/list/room.state/주기 snapshot 모두 해당한다. 하나의 capture를 여러 수신자 또는 response+event에 재사용하면 같은 seq다. snapshot 생성은 revision을 바꾸지 않는다.
 - 시작/종료 시 room snapshot sequence는 유지한다. room.state의 metadata는 revision으로 판단하고 주기 game.snapshot의 match/seq 필터와 분리한다.
-- `room.start` 요청 payload는 `{}`, 성공 payload는 `{"snapshot":fullState}`. requester에는 response → game.started(snapshot) → room.state 순서다. 다른 멤버에는 game.started → room.state 순서다.
+- `room.start` 요청 payload는 `{}`, 성공 payload는 `{"snapshot":fullState}`. `game.started` 이벤트 payload도 기존 spec대로 `{"snapshot":fullState}` wrapper다. requester에는 response → game.started(snapshot) → room.state 순서다. 다른 멤버에는 game.started → room.state 순서다.
 - handler는 `Tick` 또는 `OnLeave` outcome의 비어 있지 않은 `EndReason`으로 종료한다. reference handler는 자동 종료 조건이 없다. 테스트 handler로 정상 종료/다음 match를 검증한다. 새 client `room.end` op나 임의 제한 시간·승패 규칙을 추가하지 않는다.
 - `game.ended` payload는 이번 선택으로 `{"match_id":"old","reason":"handler reason","server_tick":lastCompletedTick,"snapshot":waitingFullState}`이며 이후 room.state도 같은 waitingFullState를 쓴다.
 - handler 생성·Start 실패는 `GAME_ERROR`이며 WAITING을 유지한다. OnLeave는 membership 제거와 잠금 해제 후 호출한다. hook 오류가 이미 끊긴 참가자를 복원하면 안 된다.
@@ -189,7 +189,7 @@ return out
 
 **독립 산출물:** 수동 clock을 쓰는 core 시험으로 start→입력→완료 ACK→snapshot→leave/end/restart/close를 검증한다. 기존 서버 테스트 전체가 이 commit에서도 컴파일·통과해야 한다.
 
-**Files:** Modify `internal/room/types.go`, `session.go`, `manager.go`, `actor.go`, `errors.go`, `manager_test.go`; Create `internal/room/realtime.go`, `realtime_test.go`. **호환 seam만 Modify** `internal/transport/server.go`: 기존 Events 소비를 Event.Snapshot으로 풀고 `Op=="room.state"`만 기존 경로에 넘긴다. 새 WS op dispatch와 outbox는 Task 3 소유다.
+**Files:** Modify `internal/room/types.go`, `session.go`, `manager.go`, `actor.go`, `errors.go`, `manager_test.go`; Create `internal/room/realtime.go`, `realtime_test.go`. **호환 seam만 Modify** `internal/transport/server.go`: 기존 Events 소비를 Event.Snapshot으로 풀고 `Op=="room.state"`만 기존 경로에 넘긴다. 새 WS op dispatch와 outbox는 Task 3 소유다. root 승인으로 `internal/transport/server_test.go`의 단일 `Events().Snapshot` 호환 seam도 Task 2 소유에 포함한다.
 
 **Interfaces — consumes:** Task 1의 `game.GameHandler`, `game.NewMovement()`, `game.Action`, `game.State.Clone()`, `game.Outcome` 및 기존 `Create`, `Join`, `Leave`, `Disconnect`, session identity/cleanup token.
 
@@ -450,7 +450,7 @@ end 통합 시험은 `room.Config.HandlerFactory`에 test ending handler를 넣�
 
 **독립 산출물:** 조정 가능한 실행 서버와 반복 가능한 외부 WS CLI가 같은 match/tick 공개 상태 및 실제 이동을 확인한다.
 
-**Files:** Modify `internal/config/config.go`, `config_test.go`, `cmd/roomcheck/main.go`, `main_test.go`, `README.md`, `docs/specs/03-realtime-sync.md`, `04-messages-and-api.md`, `07-implementation-and-config.md`, `08-validation.md`; Create `cmd/roomcheck/movement.go`, `movement_test.go`.
+**Files:** Modify `internal/config/config.go`, `config_test.go`, `cmd/roomcheck/main.go`, `README.md`, `docs/specs/03-realtime-sync.md`, `04-messages-and-api.md`, `07-implementation-and-config.md`, `08-validation.md`; Create `cmd/roomcheck/movement.go`, `movement_test.go`. **root 승인 추가 Modify:** `docs/specs/README.md`, `01-overview.md`, `docs/go-room-server-design.md`의 상태 문구와 이 실행계획 `docs/implementation/realtime-movement-plan.md`의 ownership 기록. **Task3 I1 root 승인 추가 Modify:** `internal/transport/server.go`, `internal/transport/movement_test.go`의 두 game.started 송신 경로를 기존 spec의 `payload.snapshot` wrapper로 일치시키고 관련 시험만 갱신한다. ordering/dedup/fence/core API는 유지한다.
 
 **Interfaces — consumes:** Task 2 Config 필드와 Snapshot/GameState/ActionAck 타입, Task 3의 공개 JSON 계약.
 

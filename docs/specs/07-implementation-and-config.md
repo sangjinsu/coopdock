@@ -21,7 +21,7 @@
 메모리 저장 제안에서는 서버 재시작 시 세션·룸·게임 상태가 사라진다. 감사 기록(audit) 파일은 별도로 지속 보관한다.
 전용 SDK(클라이언트 연동 개발 도구 묶음)는 필수가 아니다. Godot는 `WebSocketPeer`와 공개 JSON 계약으로 나중에 연결한다.
 guest는 로그인 계정 없이 새 연결에 부여하는 임시 세션이다.
-Go 서버를 먼저 만드는 것과 Godot 클라이언트까지 완성하는 것은 별개의 작업이다.
+Go reference 3D 이동과 실시간 서버 동기화는 구현했으며 실행·검증은 [README](../../README.md)를 참조한다. 게임별 지형·충돌·협동 목표·승패와 Godot 클라이언트까지 완성하는 것은 별개의 작업이다.
 
 ## 계획한 폴더 구조
 
@@ -84,7 +84,8 @@ Hz는 초당 횟수다. TTL은 기록 보관 시간, stale은 오래된 요약 �
 | private 비밀번호 | 4~64 Unicode 문자(code point) 제안 | 대소문자 구분, 임의 trim·정규화 없음; 원문 저장·응답 없음 |
 | hash 비용·동시성 | Argon2id 파라미터·worker 수·대기 한계는 실측 후 확정 | CPU·메모리·반복 시도 중 tick 영향, worker 포화 시 SERVER_BUSY |
 | 실패 시도 제한 | IP/session/room별 횟수·TTL 제안, 구체값 미측정 | 신뢰 proxy의 IP 정책, 재접속 우회·정상 참가자 영향; RATE_LIMITED 반환 |
-| 계산 / 전송 빈도 | 30Hz tick / 15Hz snapshot 제안 | 게임 계산 비용·응답성·전송량 측정 |
+| 계산 / 전송 빈도 | 기본 ROOM_TICK_HZ=30, ROOM_SNAPSHOT_HZ=15 | tick 1~120, snapshot 1~TickHz; 실제 완료 빈도·도착 지연 미측정 |
+| 게임 입력 queue / tick budget | ROOM_INPUT_QUEUE=256, ROOM_INPUTS_PER_TICK=64 | queue 1~4096, budget 1~InputQueue; inbox+pending 합계 credit |
 | 운영 조회 간격 | 2~5초 polling(주기적 조회) 제안 | 화면 신선도와 조회 부하 측정 |
 | 총 룸·접속 한계 | 구현 후 실측으로 결정 | 실행 장비와 실제 GameHandler 기준 |
 | 입력·중요 송신·운영 큐 | 유한 크기; 숫자는 실측 후 결정 | 포화 시 오류·거절·느린 연결 정리 검증 |
@@ -93,6 +94,8 @@ Hz는 초당 횟수다. TTL은 기록 보관 시간, stale은 오래된 요약 �
 | 요약 stale·목록 제한 | 갱신 간격·조회 규모로 결정 | 오래된 정보 표시와 목록 응답량 제한 |
 | command 저장·TTL·로그 rotation | 초기 보관 정책 제안 | 재시도 기간·audit 용량·운영 규모 |
 | drain(새 수용 차단 후 종료)·연결/actor 대기·audit flush(남은 기록 저장) | 종료 시간 상한 설정 | 진행 게임 유지와 종료 시험 |
+
+tick은 고정 dt 한 단계이며 놓친 ticker 신호를 catch-up하지 않는다. 부하로 simulation 시간이 wall time보다 늦어질 수 있다. 환경변수는 빈 문자열·0·음수·범위 초과·snapshot>tick·budget>queue를 시작 시 거절한다.
 
 CPU 사용량이나 동시 룸 수의 실측 결과는 없다. 임의의 수용 규모를 기본 보장으로 삼지 않는다.
 [OWASP 저장 지침](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)의 Argon2id·고유 salt를 참고한다. hash 파라미터와 worker 수가 게임 tick에 미치는 영향은 별도로 측정한다.
