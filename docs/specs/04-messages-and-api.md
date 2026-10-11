@@ -155,35 +155,61 @@ password·hash·salt는 생성/입장 응답·`room.state`·`game.snapshot`에 �
 운영 summary·cache·로그·audit에도 포함하지 않으며 요청 전체 payload를 기록하지 않습니다.
 운영 환경의 게임 연결은 WSS, admin 화면·API는 HTTPS를 사용합니다. [OWASP WebSocket 보안 지침](https://cheatsheetseries.owasp.org/cheatsheets/WebSocket_Security_Cheat_Sheet.html)
 
-## HTTP API — 연결과 운영 조회
-
-GET은 조회 또는 연결 진입이며 상태 변경용으로 사용하지 않습니다.
+## HTTP API — 현재 연결과 운영 조회
 
 | Method / path | 기능 / 권한 |
 |---|---|
-| GET `/healthz` | 프로세스가 살아 있는지 최소 상태 확인 |
-| GET `/readyz` | 신규 게임 수용 여부 확인. drain 중 실패 |
+| GET `/healthz` | 프로세스 liveness, 200 |
+| GET `/readyz` | 신규 게임 수용 gate, 수용 중 200·종료 시작 뒤 503 |
 | GET `/ws` | 게임 guest WebSocket 연결 |
-| GET `/admin` | 운영 인증 후 HTML 화면 제공 |
-| GET `/admin/api/status` | 서버 instance·집계·종료 진행 요약. viewer / operator |
-| GET `/admin/api/rooms` | public·private 모두 포함한 개수 제한 룸 목록. viewer / operator |
-| GET `/admin/api/rooms/{id}` | 내부 room_id 대상 운영 요약. viewer / operator |
-| GET `/admin/api/commands/{command_id}` | 명령의 실제 실행 결과·audit 상태. viewer / operator |
+| GET/HEAD `/admin`, `/admin/` | Basic viewer 인증 후 embed HTML |
+| GET/HEAD `/admin/assets/dashboard.css`, `/admin/assets/dashboard.js` | 같은 인증으로 보호된 embed 자산 |
+| GET/HEAD `/admin/api/status` | 서버 instance·연결·membership·runtime·cache 신선도 |
+| GET/HEAD `/admin/api/rooms` | public/private 전체를 필터·pagination하는 cache 목록 |
 
-## HTTP API — 운영 조작
+`ADMIN_VIEWER_TOKEN` 미설정·빈 값이면 모든 admin 경로 404입니다. 설정값은 32~256 bytes의 공백 없는 ASCII `0x21..0x7e`, username은 `viewer`입니다. 미인증·잘못된 인증은 401과 Basic challenge, 알려진 조회 경로에서 GET/HEAD 외 method는 405(`Allow: GET, HEAD`)입니다. HEAD는 GET과 같은 status/header, body 없음입니다. query의 미정의/중복 key·범위·형식 오류는 400이며 서버 오류는 500입니다. 오류 body는 `text/plain`, 성공 API는 JSON입니다. 모든 admin 응답에는 no-store/self CSP/nosniff/frame DENY를 적용합니다. HTTPS·조용한 token 입력·native Basic cache 한계는 [운영 가이드](../server-guide.md#운영-대시보드-켜기)를 따릅니다.
 
-| Method / path | 기능 / 권한 |
+### 현재 운영 JSON 계약
+
+status는 다음 필드만 반환합니다. CPU·RTT·표시지연은 nullable이며 현재 항상 `null`입니다.
+
+| 필드 | 타입 / 의미 |
 |---|---|
-| POST `/admin/api/rooms/{id}/kick` | 내부 room_id의 대상 membership 종료. operator |
-| POST `/admin/api/rooms/{id}/close` | 내부 room_id의 입장 차단·참가자 정리·룸 제거. operator |
-| POST `/admin/api/server/drain` | 신규 입장 차단과 서버 종료 진행 요청. operator |
+| `server_instance_id`, `state`, `ready` | string, `RUNNING` 또는 `STOPPING`, boolean 신규 수용 gate |
+| `active_connections`, `room_member_count` | integer live game 연결 / 실제 membership 합계 |
+| `room_count`, `waiting_room_count`, `playing_room_count` | integer 전체/WAITING/PLAYING 룸 수 |
+| `started_at`, `uptime_seconds` | UTC RFC3339 시작 시각 / integer 경과 초 |
+| `heap_alloc_bytes`, `goroutines` | integer HeapAlloc bytes / Go goroutine 수 |
+| `cpu_percent`, `rtt_ms`, `client_display_delay_ms` | number 또는 null; 현재 미측정 null |
+| `updated_at`, `age_ms`, `stale`, `generation` | UTC RFC3339 cache 게시 시각, integer age, boolean 오래됨, integer cache 세대 |
 
-`202 Accepted + command_id`는 **접수**입니다. 실행 성공은 명령 GET의 실제 결과로 확인합니다.
-운영 POST는 현재 `server_instance_id`와 idempotency key, 즉 중복 요청을 구분할 표식을 사용합니다.
-실행 전 접수 audit 저장과 명령 등록이 성공해야 202를 반환합니다. 상세 규칙은 [운영 조작과 종료](06-operations-and-shutdown.md)에 있습니다.
-guest 연결·룸 비밀번호와 운영 인증은 분리합니다. viewer는 조회, operator는 조작이며 서버가 권한을 검사합니다.
-운영 대상의 `{id}`는 사용자 입력 번호가 아닌 고정 내부 `room_id`입니다.
-cookie로 인증한 변경 요청에는 CSRF 방어와 Origin 검증이 필요합니다. [OWASP 지침](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+rooms envelope는 `total`, `matched_total`, `offset`, `limit`(integer), `rooms`(배열), `updated_at`, `age_ms`, `stale`, `generation`을 반환합니다. `total`은 전체 룸 수, `matched_total`은 필터 일치 수입니다. 필터 뒤 번호·room ID 오름차순 정렬 후 pagination하며 빈 결과는 `[]`입니다.
+
+| 각 `rooms` row | 타입 / 의미 |
+|---|---|
+| `room_id`, `room_number` | string 내부 identity / ASCII 6자리 사용자 번호, 선행 0 유지 |
+| `visibility`, `phase` | `public` 또는 `private` / `WAITING` 또는 `PLAYING` |
+| `capacity`, `member_count` | integer 정원 / 실제 인원 |
+| `host_id`, `match_id` | string host / string 또는 null match; WAITING은 null |
+| `updated_at`, `age_ms`, `stale` | actor summary 게시 시각 UTC RFC3339 / integer age / boolean 오래됨 |
+
+query는 `limit` 기본100(1~100), `offset` 기본0(0~4096), `number_prefix` 기본빈값(ASCII 숫자 0~6자리), `phase=all|WAITING|PLAYING`, `visibility=all|public|private`입니다. 숫자 query는 ASCII decimal이며 UI limit는 100입니다.
+
+`updated_at`은 HTTP 응답 시각이 아닙니다. row와 envelope 시각은 각각 actor 게시와 collector cache 게시를 뜻하며 `age_ms >= 5000`이면 stale입니다. actor summary/collector/runtime는 각각 1초, UI는 batch 완료 후 5초 polling과 batch timeout 5초입니다. HTTP는 cache만 읽으며 actor·manager callback/lock·runtime sampling을 실행하지 않습니다. 운영 조회는 게임 revision·snapshot_seq를 바꾸지 않습니다. 비밀번호·hash·salt·운영 token·전체 member ID 목록·game_state는 운영 DTO에서 제외합니다. 게임 `room.list`는 public-only입니다.
+
+## 후속 HTTP API — 운영 상세와 조작
+
+아래는 설계이며 현재 구현되지 않았습니다. 인증한 상세·commands 조회는 404입니다. viewer의 알려진 kick/close/drain POST는 403이며 실행하지 않습니다. 현재 operator 계정이나 202 command 처리 경로는 없습니다.
+
+| Method / path | 후속 기능 / 권한 |
+|---|---|
+| GET `/admin/api/rooms/{id}` | 내부 room_id 대상 상세. viewer / operator |
+| GET `/admin/api/commands/{command_id}` | 실행 결과·audit 상태. viewer / operator |
+| POST `/admin/api/rooms/{id}/kick` | 대상 membership 종료. operator |
+| POST `/admin/api/rooms/{id}/close` | 입장 차단·참가자 정리·룸 제거. operator |
+| POST `/admin/api/server/drain` | 신규 입장 차단과 종료 진행. operator |
+
+후속 `202 Accepted + command_id`는 접수이며 실제 실행 성공과 구분합니다. command·audit·idempotency·cookie CSRF/Origin 정책은 [운영 조작과 종료](06-operations-and-shutdown.md)의 목표 설계입니다. 게임 guest·룸 비밀번호는 운영 권한을 주지 않습니다. 운영 대상은 재사용 가능한 번호가 아닌 내부 room ID입니다.
 
 ## 주요 게임 오류와 구현 후 확인
 
@@ -204,6 +230,6 @@ cookie로 인증한 변경 요청에는 CSRF 방어와 Origin 검증이 필요�
 Godot `@rpc`·자동 동기화는 custom Go JSON 계약과 자동 호환되지 않습니다. [Godot 공식 설명](https://docs.godotengine.org/en/4.7/tutorials/networking/high_level_multiplayer.html#high-level-vs-low-level-api)
 구현 후 JSON 검증·요청 응답 연결·실제 적용 ACK·초기 상태 전송 순서·권한 거부를 확인합니다.
 번호 앞 0 보존·비밀번호 누락/오류·재요청과 비밀정보 없는 응답/로그도 확인합니다.
-운영 202와 실제 결과를 구분하고, GET으로 상태를 변경하지 않는지도 확인합니다.
+현재 운영 GET이 cache만 읽는지 확인합니다. 후속 조작은 202와 실제 결과를 구분해 검증합니다.
 
 다음: [운영 대시보드](05-operations-dashboard.md) · [전체 원본](../go-room-server-design.md)

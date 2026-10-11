@@ -1,104 +1,43 @@
-# 05. 운영 대시보드 — 서버 상황을 읽는 화면
+# 05. 운영 대시보드 — 현재 조회 MVP와 후속 화면
 
-[전체 목차](README.md) · [상세 설계 원본](../go-room-server-design.md)
+[전체 목차](README.md) · [운영 사용법](../server-guide.md#운영-대시보드-켜기) · [상세 설계 원본](../go-room-server-design.md)
 
-## 무엇을 위한 화면인가
+## 현재 볼 수 있는 것
 
-**대시보드는 운영자가 서버와 룸의 상태를 확인하는 관리 화면이다.**
-게임 플레이어에게 보여 주는 게임 화면과는 별개다.
-이 문서는 만들 화면의 설계이며, 실제 UI나 지표 수집 기능을 구현한 결과가 아니다.
+같은 Go binary의 `/admin`은 **Basic viewer 인증을 거친 조회 전용 화면**이다. 공개·비공개 룸을 모두 조회하며 게임 플레이 화면과는 별개다. HTML·CSS·JS는 embed되어 외부 CDN·font·image나 frontend build가 필요하지 않다.
 
-| 구분 | 내용 |
+| 화면 | 현재 구현 |
 |---|---|
-| 확정 요구 | 운영 대시보드를 서버 전체 구성에 포함한다. |
-| 초기 제안 | Go 실행 파일에서 화면 제공, 작은 JavaScript(JS)로 2~5초마다 조회한다. |
-| 후속 작업 | 실제 화면 제작, 지표 수집, 로그인 방식 선택, 게임에 미치는 영향 측정 |
+| 서버 개요 | RUNNING/STOPPING, readiness, instance ID, live 연결 수, 룸 membership 합계, 전체/대기/게임 중 룸 수 |
+| 룸 목록 | 전체 내부 room ID·6자리 번호·visibility·phase·인원/정원·host ID·nullable match ID |
+| 검색과 페이지 | 번호 앞자리 ASCII 0~6자리, WAITING/PLAYING, public/private, 100개 페이지와 이전/다음 |
+| runtime | uptime 초, HeapAlloc MiB, goroutine 수; CPU·RTT·클라이언트 표시지연은 미측정 |
+| 신선도 | cache와 actor row의 갱신 시각·age·stale, API별 마지막 성공 자료와 오류 |
 
-## 운영자가 궁금해할 질문
+RUNNING은 프로세스 실행 상태, readiness는 신규 수용 gate, freshness는 자료의 게시 시각이다. readiness가 true여도 정원이 남거나 낮은 지연이 보장되는 것은 아니다. live 연결에는 룸 밖 guest도 포함하며 membership은 룸에 실제 속한 인원이다. heap은 OS RSS가 아니며 goroutine은 플레이어 수가 아니다. 계측하지 않은 CPU·RTT·화면 지연은 API `null`, 화면 `미측정`이다.
 
-| 질문 | 어디를 보는가 | 어떻게 읽는가 |
-|---|---|---|
-| “어느 룸의 움직임이 느린가?” | 룸 목록 → 상세 | 실제 계산 빈도와 계산 밀림, 송신 대기를 함께 본다. |
-| “새 게임을 받을 수 있나?” | 서버 개요 | RUNNING인지, 신규 수용 준비 상태가 정상인지 확인한다. |
-| “왜 한 플레이어만 느린가?” | 연결 현황 | 해당 연결의 송신 대기와 큐 포화를 살핀다. 원인을 단정하지 않는다. |
-| “강퇴 버튼을 누른 결과는?” | 조작 결과 | 접수 번호로 실제 실행 결과와 감사 기록 상태를 확인한다. |
+전체 ID와 번호를 잘라내지 않으며 번호는 문자열로 앞 0을 유지한다. private도 운영 목록에 표시하지만 게임 `room.list`는 public-only다. password·hash·salt·운영 token·전체 member ID 목록·game_state는 운영 summary/cache/API/HTML/로그에 넣지 않는다.
 
-예를 들어 목표가 30Hz, 즉 초당 30회 계산인데 실제 빈도가 낮고 밀림이 늘면 해당 룸의 처리 비용을 조사한다.
-송신 대기만 증가하면 계산과 전송 문제를 나누어 살핀다. 이 수치는 앞으로 계측할 값이다.
+## 갱신과 조회 경계
 
-## 여섯 가지 화면
+actor summary, collector, runtime sampler는 각각 1초다. collector가 manager의 registry refs/readiness, actor의 atomic allowlist summary, transport live count와 독립 runtime 자료를 모아 불변 cache를 게시한다. HTTP는 cache만 읽고 manager/actor lock·callback·runtime sampling을 수행하지 않는다. 게임 snapshot을 재사용하거나 revision/snapshot_seq를 증가시키지 않는다.
 
-| 화면 | 보여 줄 내용 |
-|---|---|
-| 서버 개요 | 실행·종료 상태, 신규 수용 준비 상태, 접속·룸 수 |
-| 룸 목록 | public·private 모두 표시. 내부 룸 ID, 입력 번호, 공개 여부, 대기/게임 중 상태, 인원/정원, host, match ID |
-| 룸 상세 | 번호·공개 여부, 참가자와 입장 관계 식별자, 룸의 계산·큐·송신 요약 |
-| 연결 현황 | 연결 상태, 송신 대기, 느린 연결을 닫은 횟수와 이유 |
-| 조작 결과 | 명령 접수 번호, 실행 상태, 실제 결과, 감사 기록 실패 여부 |
-| 데이터 신선도 | 마지막 갱신 시각과 오래된 정보인지 여부 |
+admin 미설정에도 actor의 1초 summary heartbeat는 유지한다. collector/runtime loop는 생성하지 않으므로 0개다. 고정 게시 비용과 runtime 수집의 실제 게임 부하 영향은 미측정이며 최대 룸 수는 `ROOM_MAX_ROOMS`로 제한한다.
 
-membership은 “이 세션이 지금 이 룸에 속한 입장 관계”다.
-이 식별자는 예전 화면의 강퇴 요청이 다른 입장 관계에 적용되는 것을 막는 데 사용한다.
-운영 조작은 내부 `room_id`를 대상으로 한다. 닫힌 뒤 재사용될 수 있는 사용자 입력 번호로 대상을 바꾸지 않는다.
-플레이어의 공개 `room.list`와 달리 운영자는 private도 조회하지만 password·hash·salt는 볼 수 없다.
+`updated_at`은 UTC RFC3339의 **게시 시각**이다. status/rooms envelope는 collector cache, room row는 actor summary 시각이다. HTTP 응답 시각이나 게임 snapshot 생성 시각이 아니다. `started_at`은 instance 시작 시각, `generation`은 cache 세대다. `age_ms >= 5000`이면 stale이며 HTTP와 UI의 임계값은 고정 5초다. UI는 수신 후 monotonic 경과시간을 더하므로 수동 mode에서도 age가 진행한다. envelope가 최신이어도 개별 row는 오래될 수 있다.
 
-## 숫자를 오해하지 않고 읽기
+polling은 두 API batch 완료 후 5초, batch timeout은 5초다. 한 batch만 진행하며 hidden tab·auto off·pagehide에서 취소한다. persisted pageshow 복귀는 lifecycle/age 표시를 복구하고 visible·auto on·인증 유효 조건에서만 조회한다. 일반 최초 pageshow는 조회를 추가하지 않는다. 실제 BFCache 사용 여부는 browser가 결정한다.
 
-tick은 서버가 게임을 한 단계 계산하는 작업이다.
-snapshot은 그 시점의 전체 게임 상태를 클라이언트에 알려 주는 메시지다.
-목표 빈도는 설정값이고 실제 빈도는 관측 구간에서 완료한 작업 수로 계산한다.
-큐는 처리할 일이 차례를 기다리는 공간이다. 점유가 한계에 가까워지는지 함께 본다.
+일반 오류는 API별 마지막 성공 자료·조건·시각을 유지하면서 오류를 알린다. 최초 실패의 `—`와 성공한 0은 다르다. 401/403은 자료를 지우고 polling을 멈춘다. 재인증은 reload이며 native Basic 자격증명 cache를 지우거나 logout을 보장하지 않는다. 서버 종료 뒤 polling 실패는 종료에 따른 단절일 수 있다.
 
-| 항목 | 화면에서 구분할 것 |
-|---|---|
-| tick / snapshot | 목표와 실제 빈도; snapshot은 생성 빈도와 송신 빈도도 구분 |
-| 계산 처리시간 / 밀림 | 계산에 걸린 시간과 예정 시각보다 늦어진 시간을 구분 |
-| 큐 점유 | 대기 중 작업 수와 한계; 입력·정리·운영·중요 송신 큐를 각각 표시 |
-| 전송 상태 | 송신 대기·오류, 미전송 snapshot 교체, 느린 연결 종료 |
-| 서버 기본 상태 | 연결·룸·플레이어 수, 실행시간(uptime), Go 메모리(heap), 실행 작업(goroutine) 수 |
-| RTT | 한 측정 주체가 메시지를 보내 응답받기까지의 왕복 시간 |
-| 화면 지연 | 클라이언트 수신·보간·표시 시간을 측정해야 알 수 있음 |
-| CPU | 운영체제의 수집기(OS sampler)로 후속 수집할 선택 사항; 현재 미계측 |
+## 인증과 보호
 
-RTT가 작아도 플레이어 화면에 상태가 곧바로 표시된다고 보장하지 않는다.
-server와 client의 시계 차이를 무시한 시각 차를 도착 지연으로 사용하지 않는다.
-계측하지 않은 CPU·RTT·화면 지연은 API에서 `null`(값 없음), 화면에서 `미측정`으로 표현하고 0으로 표시하지 않는다.
+`ADMIN_VIEWER_TOKEN`은 운영 전용으로 username `viewer`와 HTTP Basic으로 검증한다. 미설정·빈 값이면 모든 admin 경로 404와 collector/runtime 비생성이다. 설정값은 32~256 bytes의 공백 없는 printable ASCII `0x21..0x7e`만 허용한다. HTML·자산도 인증되며 공개 login shell은 없다.
 
-## 화면 조회가 게임 진행을 기다리게 하지 않기
+오류 응답까지 no-store/self CSP/nosniff/frame DENY를 적용한다. UI fetch는 same-origin credentials와 no-store를 사용하고 token을 JS가 읽거나 저장하지 않는다. `WS_ORIGINS`는 게임 WebSocket 정책이다. 외부 운영의 Basic은 reverse proxy HTTPS가 필요하며 이번 구현은 배포/TLS 변경을 포함하지 않는다. 조용한 token 입력과 정확한 method/status/query/JSON은 [서버 가이드](../server-guide.md#운영-대시보드-켜기)와 [API 계약](04-messages-and-api.md#현재-운영-json-계약)을 따른다.
 
-룸 actor는 룸 상태를 변경하는 전담 실행 작업이다.
-actor와 WebSocket 경로가 운영용 요약 복사본을 비차단으로 게시한다.
-비차단이란 요약을 받는 쪽이 늦더라도 게임 계산이 그 완료를 기다리지 않는다는 뜻이다.
+## 후속 화면과 미측정 범위
 
-운영 GET(조회) 요청은 불변 cache, 즉 게시된 뒤 변경되지 않는 요약 보관소를 읽는다.
-조회 때마다 actor의 답을 기다리거나 전체 `game_state`를 JSON으로 새로 변환하지 않는다.
-따라서 운영자가 새로고침을 많이 해도 게임 루프가 조회 응답을 기다리는 구조를 만들지 않는다.
-실제 부하 영향은 구현 후 측정해야 한다.
-summary·cache에는 공개할 필드만 복사하고 비밀번호 원문·hash·salt를 넣지 않는다.
-private 내부 데이터 구조 전체를 직렬화하지 않는다.
+룸·연결 상세, 참가자 전체 목록, tick 완료율·밀림·큐·송신 지표, kick/close/drain, command 결과와 지속 audit, operator 계정·JWT/session/OIDC는 후속이다. 목표 설계는 [06. 운영 조작과 종료](06-operations-and-shutdown.md)에 있다. tick 설정값을 실제 처리율로, RTT를 클라이언트 표시지연으로 대신하지 않는다. 서버와 클라이언트의 시계를 단순히 빼 도착 지연으로 사용하지 않는다.
 
-요약에는 `updated_at`을 넣는다. 설정한 시간보다 오래되면 `stale`, 즉 오래된 정보로 표시한다.
-룸 목록에는 개수 제한이나 페이지를 둔다. 오래된 화면을 근거로 실행 조건을 확정하지 않는다.
-조작할 때는 서버가 현재 상태를 다시 검사한다.
-
-## 화면 제공과 접근 권한
-
-[Go embed](https://pkg.go.dev/embed)로 HTML·CSS·JS를 Go 실행 파일에 포함하는 방식을 제안한다.
-정적 파일은 [FileServerFS](https://pkg.go.dev/net/http#FileServerFS) 등으로 제공하며 별도 Node 빌드는 필수가 아니다.
-작은 JS가 HTTP 조회 API를 2~5초마다 다시 읽는 polling을 초기 제안으로 둔다.
-게임 snapshot의 15Hz 전송 제안과 운영 화면의 조회 간격은 서로 다른 설정이다.
-
-viewer는 조회 담당, operator는 조작 권한까지 가진 운영자다.
-게임 guest·룸 비밀번호와 운영 인증을 분리하고 API 서버가 매 요청의 권한을 검사한다.
-룸 비밀번호를 안다는 이유로 운영 권한을 얻을 수 없다. 운영 환경에서는 admin 화면·API를 HTTPS로 제공한다.
-화면에서 버튼을 숨기는 것만으로 권한을 제한하지 않는다. GET은 조회에만 사용한다.
-API 목록은 [04. 메시지와 API](04-messages-and-api.md), 조작 규칙은 [06. 운영 조작과 종료](06-operations-and-shutdown.md)에 있다.
-
-## 구현 후 확인할 것
-
-- 룸이 느리거나 송신이 막히는 상황을 만들어 관련 화면에서 구분할 수 있는지 확인한다.
-- 요약 게시를 지연시키면 마지막 갱신 시각과 stale 표시가 바뀌는지 확인한다.
-- viewer가 조작 API를 직접 호출해도 거부되는지 확인한다.
-- private 룸도 번호·공개 여부로 조회되며 화면·API·cache 어디에도 password·hash·salt가 없는지 확인한다.
-- 계측하지 않은 수치가 `미측정`으로 나오고 RTT를 화면 지연으로 표시하지 않는지 확인한다.
-- 운영 조회 부하를 높여도 actor가 조회 응답을 기다리지 않는지 측정한다.
+현재 검증은 deterministic actor blocking→stale→recovery·cache-only HTTP 계약, 보호된 실제 UI와 6 WS 서버 동작, 별도 mock/VM UI 행위로 구분한다. 실제 운영 부하·CPU·latency 영향·Godot 화면, native Basic prompt 입력 UX·OS background throttle·browser 메뉴 200% zoom·실제 BFCache 적격성은 별도 근거가 없으면 미검증이다. 검증 기준은 [08](08-validation.md)에 있다.

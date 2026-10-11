@@ -16,10 +16,60 @@ go run ./cmd/server
 | GET `/healthz` | 프로세스 상태: 200 |
 | GET `/readyz` | 신규 수용 중 200, 종료 시작 이후 503 |
 | GET `/ws` | WebSocket guest 연결 |
+| GET/HEAD `/admin`, `/admin/` | Basic 인증된 운영 HTML |
+| GET/HEAD `/admin/assets/dashboard.css`, `/admin/assets/dashboard.js` | 같은 인증으로 보호된 embed 자산 |
+| GET/HEAD `/admin/api/status`, `/admin/api/rooms` | 게시된 운영 cache 조회 |
 
 연결마다 새 guest ID를 발급합니다. 클라이언트는 자기 `session_id`를 요청에 지정할 수 없습니다. 한 연결은 동시에 한 룸에만 속하며 생성자는 자동 입장하고 host가 됩니다. 룸 정원은 1~6명, 미지정 기본값은 6명입니다. host 연결이 끊어지거나 퇴장하면 먼저 입장한 잔여 참가자가 host를 이어받습니다. 마지막 참가자가 나가면 룸은 삭제됩니다.
 
 모든 데이터는 메모리에 있습니다. 재시작하면 룸·비밀번호 자료·membership이 사라집니다. 재연결은 새 guest이므로 private 비밀번호를 다시 확인합니다. 룸의 visibility와 비밀번호는 수명 동안 고정입니다.
+
+## 운영 대시보드 켜기
+
+운영 인증은 게임 guest·private 룸 비밀번호와 별개입니다. 아래 예제는 Bash에서 token을 화면과 shell history에 남기지 않고 입력받습니다. macOS 기본 zsh에서는 먼저 `bash`를 실행하세요.
+
+```bash
+read -r -s ADMIN_VIEWER_TOKEN
+export ADMIN_VIEWER_TOKEN
+go run ./cmd/server
+```
+
+입력값은 **32~256 bytes, 각 byte가 `0x21..0x7e`인 공백 없는 printable ASCII**여야 합니다. 빈 값 또는 미설정이면 모든 admin 경로가 404이며 collector와 runtime sampler를 만들지 않습니다. 잘못된 비어 있지 않은 값은 `Invalid ADMIN_VIEWER_TOKEN.`으로 시작을 거절합니다. 설정한 뒤 [로컬 대시보드](http://127.0.0.1:8080/admin)를 열고 browser의 HTTP Basic challenge에 username `viewer`, password로 token을 입력합니다. token을 URL·로그·응답 예제에 넣지 마세요.
+
+미인증·잘못된 인증은 401과 Basic challenge입니다. 서버는 매 요청을 검사하고 HTML·CSS·JS도 인증 뒤 제공합니다. 알려진 조회 경로의 GET/HEAD 외 method는 405(`Allow: GET, HEAD`), viewer의 kick/close/drain POST는 403이며 실행하지 않습니다. 상세·commands와 그 외 미구현 경로는 인증 후 404입니다. admin 응답에는 오류까지 `Cache-Control: no-store`, self CSP, `nosniff`, frame `DENY`를 적용하며 외부 CDN·font·image는 사용하지 않습니다. `WS_ORIGINS`는 게임 WebSocket Origin 설정이며 운영 인증 정책이 아닙니다.
+
+HTTP Basic은 암호화가 아닙니다. 외부 운영은 기존 reverse proxy에서 HTTPS로 종료하고 Go 서버의 loopback upstream으로 전달하는 구성으로 사용하세요. 게임 연결에는 WSS와 WebSocket upgrade 전달이 필요합니다. 이번 조회 MVP는 proxy·TLS·배포 설정을 제공하거나 변경하지 않습니다. token을 로그에서 제외하고 proxy access log에도 Authorization을 기록하지 마세요.
+
+Basic 자격증명은 browser가 native cache에 보관할 수 있어 앱이 logout을 보장하지 않습니다. `다시 인증`은 현재 페이지를 reload하며 자격증명 cache 삭제를 보장하지 않습니다. token 폐기·변경은 환경변수를 바꾸고 서버를 다시 시작해 처리하며 재시작은 메모리 룸을 잃습니다.
+
+### 화면과 자료의 의미
+
+- `RUNNING`은 서버 실행 상태이고 `ready`는 신규 게임 수용 gate입니다. `STOPPING`은 종료 진행입니다. readiness true는 여유 정원·낮은 지연·모든 자료의 최신 상태를 보장하지 않습니다. DRAINING과 admin drain은 후속입니다.
+- `active_connections`는 룸 밖을 포함한 live game 연결 수, `room_member_count`는 실제 룸 membership 합계입니다. 룸 수와 WAITING/PLAYING 룸 수를 따로 표시합니다.
+- 룸 목록은 public/private 모두 표시합니다. 게임 `room.list`는 public-only를 유지합니다. 번호는 ASCII 6자리 **문자열**로 앞 0을 유지하며 내부 `room_id`, host ID, nullable match ID를 구분합니다. WAITING의 `match_id`는 `null`입니다.
+- heap은 `HeapAlloc` bytes를 MiB로 표시하며 OS RSS가 아닙니다. goroutine은 Go 실행 작업 수이며 플레이어 수가 아닙니다. CPU·RTT·클라이언트 표시지연은 API `null`, 화면 `미측정`입니다.
+
+room actor summary·background collector·runtime sampler는 각각 1초 주기입니다. HTTP는 cache만 읽으며 actor/manager lock·callback·runtime sampling을 실행하지 않습니다. actor summary 게시에는 게임 `snapshot()`을 재사용하지 않으며 revision·snapshot_seq를 증가시키지 않습니다. admin이 꺼져도 actor의 1초 summary heartbeat는 유지합니다. collector/runtime loop는 0개지만 이 고정 게시 비용은 남으며 최대 룸 수는 `ROOM_MAX_ROOMS`로 제한합니다. 게시·runtime sampling의 실제 게임 부하 영향은 미측정입니다.
+
+자동 갱신은 두 API 조회 batch **완료 후 5초**, batch timeout은 5초입니다. 겹치는 조회를 만들지 않고 hidden tab·자동 갱신 해제·pagehide에서 취소합니다. BFCache의 persisted pageshow 복귀에서는 표시 age와 lifecycle을 복구하며 visible·auto on·인증 유효 조건에서만 다시 조회합니다. 일반 초기 pageshow는 조회를 중복하지 않습니다. BFCache 적격성은 browser가 결정합니다.
+
+`updated_at`은 응답 생성 시각이 아닙니다. status와 rooms envelope에서는 cache 게시 시각, 각 row에서는 actor summary 게시 시각이며 UTC RFC3339 문자열입니다. `started_at`은 서버 instance 시작 시각, `uptime_seconds`는 경과시간입니다. `generation`은 cache 게시 세대이며 게임 revision이 아닙니다. HTTP가 계산한 `age_ms`가 5000 이상이면 `stale=true`입니다. UI는 수신 뒤 monotonic 경과시간을 더해 표시하므로 수동 mode에서도 오래된 자료를 최신으로 고정하지 않습니다. cache가 최신이어도 개별 actor row는 stale일 수 있습니다.
+
+일반 조회 실패는 API별 마지막 성공 자료·필터·시각을 유지하고 오류를 표시합니다. 최초 실패는 `—`를 유지하며 성공한 0과 구별합니다. 401/403에서는 자료를 지우고 polling을 멈춥니다. 서버를 종료한 뒤의 polling 실패는 서버 종료 때문일 수 있으며 게임 입력 실패나 drain 명령 실패를 뜻하지 않습니다.
+
+### 룸 검색과 API
+
+UI는 100개씩 번호 오름차순으로 표시하고 이전/다음, 번호 앞자리·phase·visibility 필터를 제공합니다. 서버는 **전체 cache에 필터를 먼저 적용한 뒤** pagination합니다. 같은 번호는 내부 room ID로 정렬합니다. 빈 서버와 필터 결과 없음도 구별합니다.
+
+| `/admin/api/rooms` query | 기본값 / 허용값 |
+|---|---|
+| `limit` | 100 / ASCII 정수 1~100 |
+| `offset` | 0 / ASCII 정수 0~4096 |
+| `number_prefix` | 빈 문자열 / ASCII 숫자 0~6자리 |
+| `phase` | `all` / `all`, `WAITING`, `PLAYING` |
+| `visibility` | `all` / `all`, `public`, `private` |
+
+알 수 없는 key·중복 key·잘못된 값·malformed query는 400입니다. `total`은 모든 룸 수, `matched_total`은 필터 일치 수, `rooms`는 현재 페이지입니다. 결과가 없으면 배열 `[]`이며 `null`이 아닙니다. 정확한 JSON 필드는 [메시지와 API](specs/04-messages-and-api.md#현재-운영-json-계약)에 있습니다. summary/cache/API/HTML/로그에는 password·hash·salt·운영 token·전체 member ID 목록·game_state를 넣지 않습니다.
 
 ## 실제 WebSocket 메시지
 
@@ -132,6 +182,7 @@ PLAYING 신규 입장·재입장은 `ROOM_IN_PROGRESS`입니다. 일부 참가�
 
 | 변수 | 기본값 | 허용 범위·형식 |
 |---|---:|---|
+| `ADMIN_VIEWER_TOKEN` | 미설정(비활성) | 설정 시 32~256 bytes, `0x21..0x7e`만 허용 |
 | `HTTP_ADDR` | `127.0.0.1:8080` | 비어 있지 않은 host와 port 1~65535 |
 | `WS_ORIGINS` | 추가 목록 없음 | 쉼표로 나눈 명시 host 또는 host:port; wildcard·scheme·host 내부 공백 금지, 항목 양끝 공백 제거 |
 | `ROOM_MAX_ROOMS` | 128 | 1~4096 |
@@ -192,7 +243,7 @@ go build ./...
 
 시험은 실제 `httptest` HTTP/WebSocket과 실제 룸 코어를 사용합니다. 정원·동시 입장·순서·재입장·host 승계·Origin·strict frame·read limit·timeout·reader 취소·queue 포화·종료 경합을 검사합니다. transport의 지연 검사는 package 내부 barrier로 수행하고 hash 진행 중 취소·늦은 결과는 코어의 별도 barrier 시험이 검사합니다.
 
-현재 프로젝트는 초기 reference 단계입니다. free-space reference 3D 이동과 서버 동기화는 구현했습니다. 게임별 지형·충돌·중력·협동 목표·승패, admin HTTP 경로, 지속 audit, Godot client·게임 화면·보간·예측, 자동 재접속 복원은 현재 미구현입니다. 실제 TCP 손실·jitter 주입, 운영 부하·수용 규모·UI 지연은 측정하지 않았습니다. deterministic barrier와 race 시험을 실제 네트워크 손실 시험이나 성능 보장으로 해석하지 않습니다. 미지원 WS op는 `INVALID_MESSAGE`, admin 경로는 HTTP 404입니다. Godot은 후속 custom WebSocket + JSON client를 구현해야 합니다.
+현재 프로젝트는 초기 reference 단계입니다. free-space reference 3D 이동과 서버 동기화는 구현했습니다. 게임별 지형·충돌·중력·협동 목표·승패, admin 상세·조작·commands, 지속 audit, Godot client·게임 화면·보간·예측, 자동 재접속 복원은 현재 미구현입니다. 실제 TCP 손실·jitter 주입, 운영 부하·수용 규모·UI 지연은 측정하지 않았습니다. deterministic barrier와 race 시험을 실제 네트워크 손실 시험이나 성능 보장으로 해석하지 않습니다. 미지원 WS op는 `INVALID_MESSAGE`입니다. 조회용 admin MVP는 위 인증 조건으로 제공하고 후속 admin 경로는 실행하지 않습니다. Godot은 후속 custom WebSocket + JSON client를 구현해야 합니다.
 
 ## 고정한 dependency와 공식 자료
 

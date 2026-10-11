@@ -6,7 +6,7 @@
 
 **서버의 역할을 나누고 개발 순서와 조정할 설정을 정한다.**
 예를 들어 먼저 “6명이 같은 룸에 들어가고 퇴장한다”를 확인한 다음 이동 규칙과 운영 화면을 붙인다.
-아래 폴더·파일은 목표 구조이며 현재 서버 구현의 파일 구성과 다를 수 있다. 실제 구현 범위·구성과 실행 방법·검증은 [서버 가이드](../server-guide.md)를 참조한다. 운영 API와 대시보드 자산은 후속 구현 범위다.
+아래 폴더·파일은 목표 구조이며 현재 서버 구현의 파일 구성과 다를 수 있다. 실제 구현 범위·구성과 실행 방법·검증은 [서버 가이드](../server-guide.md)를 참조한다. Basic viewer 인증·status/rooms API·embed 대시보드 자산은 현재 구현이다. command/audit/lifecycle의 조작 모듈은 후속 목표다.
 
 ## 확정 범위와 초기 선택
 
@@ -15,15 +15,17 @@
 | 확정 요구 | Go 우선, 룸당 1~6명, 실시간 이동·협동, 향후 Godot 연결, 운영 대시보드 |
 | 확정 요구 | 번호 직접 입장, private는 생성자가 지정한 비밀번호 확인 |
 | 초기 제안 | 단일 프로세스와 메모리 저장, `net/http` + `coder/websocket`, guest 세션 |
-| 후속 범위 | Godot 게임 화면·보간·예측, 운영 로그인 제품 선택, 규모에 따른 확장 |
+| 후속 범위 | Godot 게임 화면·보간·예측, operator 계정·로그인 제품 선택, 규모에 따른 확장 |
 
 단일 프로세스는 하나의 서버 실행 프로그램에서 룸과 운영 기능을 함께 처리한다는 뜻이다.
-메모리 저장 제안에서는 서버 재시작 시 세션·룸·게임 상태가 사라진다. 감사 기록(audit) 파일은 별도로 지속 보관한다.
+메모리 저장 제안에서는 서버 재시작 시 세션·룸·게임 상태가 사라진다. 감사 기록(audit)의 별도 지속 보관은 후속 설계다.
 전용 SDK(클라이언트 연동 개발 도구 묶음)는 필수가 아니다. Godot는 `WebSocketPeer`와 공개 JSON 계약으로 나중에 연결한다.
 guest는 로그인 계정 없이 새 연결에 부여하는 임시 세션이다.
 Go reference 3D 이동과 실시간 서버 동기화는 구현했으며 실행·검증은 [서버 가이드](../server-guide.md)를 참조한다. 게임별 지형·충돌·협동 목표·승패와 Godot 클라이언트까지 완성하는 것은 별개의 작업이다.
 
-## 계획한 폴더 구조
+## 목표 폴더 구조와 현재 조회 모듈
+
+아래 `command.go`, audit/lifecycle 등은 후속 목표다. 현재 조회 source는 `internal/admin/http.go`, `auth.go`, `web.go`, `web/index.html`, `web/dashboard.js`, `web/dashboard.css`이며 observability collector/runtime와 room atomic summary를 사용한다.
 
 ```text
 cmd/server/main.go
@@ -41,8 +43,8 @@ internal/
     web.go
     web/
       index.html
-      app.js
-      style.css
+      dashboard.js
+      dashboard.css
   observability/
   audit/
   lifecycle/
@@ -58,7 +60,7 @@ actor는 변경 가능한 룸 상태를 전담하는 실행 작업이고 GameHan
 | room | 내부 ID·번호 registry와 룸별 actor; actor만 멤버·게임 상태 변경 |
 | room/password.go | actor 밖의 bounded worker에서 Argon2id 생성·검증, 비밀정보를 공개 상태와 분리 |
 | game | GameHandler로 이동·충돌·협동·게임 종료 규칙 계산 |
-| admin | 운영 화면, 서버 측 인증·권한, 명령 접수·결과 조회 |
+| admin | 현재 Basic viewer 인증과 cache-only 조회·embed 화면. 명령 접수·결과 조회는 후속 |
 | observability | 운영 요약 복사본과 지표 집계 |
 | audit / lifecycle | 감사 기록 디스크 쓰기 / drain과 종료 조율 |
 | config | 설정 읽기와 범위 검사 |
@@ -86,12 +88,13 @@ Hz는 초당 횟수다. TTL은 기록 보관 시간, stale은 오래된 요약 �
 | 실패 시도 제한 | IP/session/room별 횟수·TTL 제안, 구체값 미측정 | 신뢰 proxy의 IP 정책, 재접속 우회·정상 참가자 영향; RATE_LIMITED 반환 |
 | 계산 / 전송 빈도 | 기본 ROOM_TICK_HZ=30, ROOM_SNAPSHOT_HZ=15 | tick 1~120, snapshot 1~TickHz; 실제 완료 빈도·도착 지연 미측정 |
 | 게임 입력 queue / tick budget | ROOM_INPUT_QUEUE=256, ROOM_INPUTS_PER_TICK=64 | queue 1~4096, budget 1~InputQueue; inbox+pending 합계 credit |
-| 운영 조회 간격 | 2~5초 polling(주기적 조회) 제안 | 화면 신선도와 조회 부하 측정 |
+| 운영 조회 간격 | batch 완료 후 5초, batch timeout 5초; actor/collector/runtime 각각 1초 | hidden/auto-off 취소, persisted 복귀 복구; 부하 영향 미측정 |
+| 운영 인증 | ADMIN_VIEWER_TOKEN 미설정/빈값이면 비활성404 | 설정 시32~256 bytes·ASCII 0x21..0x7e, username viewer |
 | 총 룸·접속 한계 | 구현 후 실측으로 결정 | 실행 장비와 실제 GameHandler 기준 |
 | 입력·중요 송신·운영 큐 | 유한 크기; 숫자는 실측 후 결정 | 포화 시 오류·거절·느린 연결 정리 검증 |
 | membership(현재 룸 소속) 정리 큐 | 룸 정원 이상, 전용 용량 | 운영 큐가 그 슬롯을 차용하지 않음 |
 | 메시지 크기·timeout(대기 제한 시간) | 구현 단계에서 상한 설정 | 정상 게임 동작과 느린 연결 시험 |
-| 요약 stale·목록 제한 | 갱신 간격·조회 규모로 결정 | 오래된 정보 표시와 목록 응답량 제한 |
+| 요약 stale·목록 제한 | 고정 age_ms>=5000, limit 기본100·1~100, offset 0~4096 | 필터 뒤 pagination, row/envelope 게시 시각 구분 |
 | command 저장·TTL·로그 rotation | 초기 보관 정책 제안 | 재시도 기간·audit 용량·운영 규모 |
 | drain(새 수용 차단 후 종료)·연결/actor 대기·audit flush(남은 기록 저장) | 종료 시간 상한 설정 | 진행 게임 유지와 종료 시험 |
 
@@ -108,7 +111,7 @@ CPU 사용량이나 동시 룸 수의 실측 결과는 없다. 임의의 수용 
 | 1 | 연결·guest·프로토콜·번호·public/private 룸·hash worker | 번호/비밀번호 입장, 정원·한 세션 한 룸, host 승계·빈 룸 삭제 |
 | 2 | 이동·협동 GameHandler | 서버가 입력을 적용하고 위치·협동 결과를 판정 |
 | 3 | 실시간 동기화 | 시험용 6클라이언트로 입력 순서·상태 일치·전송 순서 확인 |
-| 4 | 읽기 전용 대시보드 | 인증·권한·요약 신선도를 확인하고 게임 영향 측정 |
+| 4 | 현재 읽기 전용 대시보드 | Basic viewer·불변 cache·요약 신선도·실제 6 WS 병행 확인; 게임 부하 영향은 미측정 |
 | 5 | 운영 조작 + 지속 audit | 접수와 실제 결과 구분, 중복 재시도·기록 실패 처리 |
 | 6 | drain·종료·운영 부하 | 신규 입장 경합, 연결·actor 정리, audit flush 상한 확인 |
 

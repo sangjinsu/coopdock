@@ -4,7 +4,9 @@
 게임 입력, 운영 조회, 운영 조작은 서로 다른 경로를 사용한다.
 아래 문서는 목표로 하는 전체 설계이며, 실제 구현 범위와 구분한다.
 현재 구현 범위·실행 방법·검증은 [서버 가이드](server-guide.md)를 참조한다.
-reference 3D 이동 GameHandler와 서버 동기화의 현재 구현·검증은 서버 가이드를 참조한다. 게임별 지형·충돌·협동 규칙, Godot 클라이언트, 운영 대시보드와 운영 부하·성능 측정은 후속 범위다.
+reference 3D 이동 GameHandler와 서버 동기화의 현재 구현·검증은 서버 가이드를 참조한다. 현재 Basic viewer 조회 대시보드(status/rooms·embed 화면)를 구현했다. 게임별 지형·충돌·협동 규칙, Godot 클라이언트, 운영 상세·조작·audit와 운영 부하·성능 측정은 후속 범위다.
+
+아래는 **후속 조작을 포함한 목표 그림**이다. 현재 게임/조회 경로는 [README 구조도](../README.md#서버의-두-경로), 현재 JSON·인증·주기는 [운영 가이드](server-guide.md#운영-대시보드-켜기)를 따른다.
 
 ```mermaid
 flowchart TB
@@ -34,7 +36,7 @@ flowchart TB
     end
     Player -->|JSON 입력| WS
     Writer -->|상태 / 이벤트| Player
-    Operator -->|2~5초 조회 제안| Get
+    Operator -->|현재 batch 완료 후 5초 조회| Get
     Cache -->|요약 / 갱신 시각| Operator
     Operator -->|조작 요청| Post
 ```
@@ -66,7 +68,7 @@ flowchart TB
 | host 퇴장 | 남은 참가자 중 가장 먼저 입장한 사람으로 승계 |
 | 빈 룸 | 마지막 참가자 퇴장 시 즉시 닫고 registry에서 제거 |
 | 게임 계산 / 전송 | 계산 30Hz / full snapshot 15Hz를 측정 시작값으로 제안 |
-| 대시보드 | 같은 binary에서 HTML·작은 JS 제공, 2~5초 polling 제안 |
+| 대시보드 | 현재 같은 binary의 보호된 embed HTML·CSS·JS, Basic viewer·batch 완료 후 5초 polling |
 | 구현 순서 | 게임 코어와 읽기 전용 운영 화면 우선, 조작과 지속 audit은 함께 추가 |
 
 ### 후속 범위
@@ -353,93 +355,46 @@ actor 종료는 `done` / context 취소로 알린다.
 [Accept](https://pkg.go.dev/github.com/coder/websocket#Accept) 이후 장기 연결은 서버가 관리하는 context로 유지한다.
 HTTP handler 반환 시 취소되는 `r.Context()`를 WebSocket 수명의 기준으로 사용하지 않는다.
 
-## 7. 운영 대시보드와 조회 cache
+## 7. 현재 운영 대시보드와 조회 cache
 
-대시보드는 [Go embed](https://pkg.go.dev/embed)로 HTML·CSS·작은 JS를 binary에 포함한다.
-[FileServerFS](https://pkg.go.dev/net/http#FileServerFS) 또는 `http.FileServer(http.FS(...))`로 정적 파일을 제공한다.
-외부 frontend framework나 Node 빌드는 필수가 아니다.
-embed 리소스는 선언하는 Go 패키지 안의 하위 폴더에 둔다.
+[Go embed](https://pkg.go.dev/embed)로 `internal/admin/web/index.html`, `dashboard.css`, `dashboard.js`를 binary에 포함한다. 인증 뒤 고정 path에서 제공하며 공개 login shell·외부 CDN/font/image는 없다. 현재 화면은 서버 개요와 public/private 룸 목록·번호 앞자리/phase/visibility 필터·100개 pagination·API별 오류/신선도다. 상세·연결 상세·조작 결과는 후속이다.
 
-| 화면 | 내용 |
+actor summary·collector·runtime sampler는 각각 1초, UI polling은 batch 완료 후 5초와 batch timeout 5초, stale는 고정 `age_ms >= 5000`이다. actor는 atomic allowlist summary를 게시하고 collector는 registry refs/ready·transport live count·독립 runtime 자료를 모아 불변 cache를 만든다. HTTP는 cache만 읽어 actor/manager lock·callback·runtime sampling을 하지 않는다. 게임 snapshot 재사용과 revision/snapshot_seq 증가는 없다.
+
+admin이 꺼져도 actor의 1초 summary heartbeat는 유지한다. collector/runtime loop는 0개며 최대 룸은 `ROOM_MAX_ROOMS`로 제한한다. 이 고정 비용과 runtime sampling의 게임 부하 영향은 미측정이다. updated_at은 envelope의 cache 게시 시각, row의 actor 게시 시각으로 응답 시각과 다르다. generation은 cache 세대다. UI는 수신 후 monotonic age를 더해 수동 mode도 오래됨을 표시하며 일반 오류는 마지막 자료·조건·시각을 유지한다. 인증 실패는 자료 삭제와 polling 중단이다. hidden/auto-off/pagehide는 취소하고 persisted pageshow는 조건부 복귀한다.
+
+운영 summary/cache/API/HTML/로그에는 password·hash·salt·운영 token·전체 member ID 목록·game_state를 넣지 않는다. 게임 room.list는 public-only, 운영 목록은 private도 포함한다. CPU·RTT·클라이언트 표시지연은 API null/화면 미측정이며 heap은 HeapAlloc이다. 정확한 DTO·query·timestamp는 [04](specs/04-messages-and-api.md#현재-운영-json-계약)에 있다.
+
+## 8. 현재 HTTP API와 후속 운영 인증
+
+| Method / path | 현재 동작 |
 |---|---|
-| 서버 개요 | RUNNING / DRAINING / STOPPING, readiness, 접속·룸 수 |
-| 룸 목록 | public·private 모두 포함. 내부 room ID, room number, visibility, phase, 인원/정원, host, match ID, 요약 갱신 시각 |
-| 룸 상세 | 공개 운영 요약, tick·큐·송신 지표, 현재 참가자 |
-| 연결 현황 | 세션 연결 상태, 송신 대기·slow close 원인 등 집계 |
-| 조작 결과 | command ID, 접수·실행 상태, 결과, audit 상태 |
-| 데이터 신선도 | `updated_at`, summary age, stale 표시 |
+| GET `/healthz` | liveness 200 |
+| GET `/readyz` | 신규 수용200·종료 시작 뒤503 |
+| GET `/ws` | 게임 guest 연결 |
+| GET/HEAD `/admin`, `/admin/` | 인증된 운영 HTML |
+| GET/HEAD `/admin/assets/dashboard.css`, `/admin/assets/dashboard.js` | 인증된 embed 자산 |
+| GET/HEAD `/admin/api/status`, `/admin/api/rooms` | Basic viewer, 불변 cache 조회 |
 
-조회는 불변 운영 요약 cache만 읽는다.
-HTTP GET마다 actor를 호출하거나 전체 `game_state`를 직렬화하지 않는다.
-room actor와 WS 경로가 낮은 비용으로 비차단 요약을 게시하고 집계기가 cache를 갱신한다.
-전송 큐나 cache 갱신이 게임 tick을 기다리게 해서는 안 된다.
+운영 인증은 환경변수 `ADMIN_VIEWER_TOKEN`과 username `viewer`인 HTTP Basic이다. 미설정/빈값이면 모든 admin route 404와 collector/runtime 비생성이다. 설정값은 32~256 bytes·공백 없는 ASCII 0x21..0x7e다. 미인증/오류 401+Basic challenge, 알려진 조회 route의 다른 method 405, 잘못된 rooms query 400, 인증한 미구현 경로 404이며 viewer의 알려진 kick/close/drain POST는 403으로 실행하지 않는다. 오류까지 no-store/self CSP/nosniff/frame DENY를 적용한다. 게임 guest·룸 비밀번호와 분리하며 `WS_ORIGINS`는 admin 인증 정책이 아니다.
 
-브라우저 polling은 2~5초를 초기 제안으로 두고 요약 게시 주기·stale 임계값을 설정한다.
-요약은 갱신 시각을 포함하며 오래되면 stale로 표시한다.
-아직 수집하지 않은 지표는 0으로 가장하지 않고 `미측정`으로 표시한다.
-게임의 full snapshot 주기와 운영 화면의 갱신 주기는 별개다.
-룸 목록은 페이지나 개수 한계를 적용한다.
-운영 summary·cache·룸 상세에는 번호와 공개 여부를 표시하되 password·hash·salt를 포함하지 않는다.
-actor 내부 private 데이터 구조를 통째로 직렬화하지 않고 공개 가능한 필드만 복사한다.
+운영 HTTPS는 기존 reverse proxy를 통해 제공하며 이번 구현은 TLS·배포 변경을 포함하지 않는다. [운영 가이드](server-guide.md#운영-대시보드-켜기)의 조용한 token 입력을 사용한다. browser native Basic cache 때문에 앱 logout·재인증 reload가 credential 삭제를 보장하지 않는다. 계정 관리·operator·JWT/session/OIDC는 후속이다.
 
-## 8. HTTP API와 운영 인증
-
-| Method / path | 기능 | 권한 |
-|---|---|---|
-| GET `/healthz` | 프로세스 liveness | 최소 상태 |
-| GET `/readyz` | 신규 게임 수용 readiness, drain 중 실패 | 최소 상태 |
-| GET `/ws` | WebSocket upgrade | 게임 guest 연결 |
-| GET `/admin` | 운영 HTML | 운영 인증 |
-| GET `/admin/api/status` | 현재 instance ID, 서버·집계·종료 진행 요약 | viewer / operator |
-| GET `/admin/api/rooms` | 개수 제한 룸 목록 | viewer / operator |
-| GET `/admin/api/rooms/{id}` | 룸 운영 요약 | viewer / operator |
-| GET `/admin/api/commands/{command_id}` | 실제 실행·audit 상태 | viewer / operator |
-| POST `/admin/api/rooms/{id}/kick` | 현재 룸의 대상 membership 종료 | operator |
-| POST `/admin/api/rooms/{id}/close` | 룸 입장 차단·종료·cleanup | operator |
-| POST `/admin/api/server/drain` | 서버 입장 차단과 종료 진행 요청 | operator |
-
-명령 조회는 `server_instance_id`, `command_id`, 실행 상태, 실제 결과·실패 사유, 접수·완료 시각, `audit_failed`를 구분해 반환한다.
-운영 요약에는 현재 참가자의 membership 식별자를 포함해 조작 대상과 현재 membership을 대조할 수 있게 한다.
-
-게임 guest·룸 비밀번호와 운영 인증을 분리한다. 룸 비밀번호로 운영 권한을 얻을 수 없다.
-운영 환경의 admin 화면과 API는 HTTPS로 제공한다.
-viewer는 조회, operator는 조작 권한을 가지며 API 서버에서 검사한다.
-UI 버튼 숨김만으로 권한을 대신하지 않는다.
-구체적인 계정·로그인 구현은 후속이며, 읽기 MVP부터 서버 인증·권한 검사는 필요하다.
-
-GET으로 상태를 변경하지 않는다.
-cookie 인증의 변경 요청은 CSRF 방어와 Origin 검증을 적용하고 SameSite만으로 대신하지 않는다.
-[OWASP CSRF 지침](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)을 따른다.
+후속 API는 GET `/admin/api/rooms/{id}`, GET `/admin/api/commands/{command_id}`, POST kick/close/drain이다. 아래 sequence와 9절은 **후속 설계**이며 현재 command/audit/lane 구현 또는202 응답을 뜻하지 않는다. 향후 변경 요청의 서버 권한·CSRF/Origin 검증과 실제 결과 계약은 별도로 구현한다. 운영 대상은 재사용되는 번호가 아닌 내부 room_id다.
 
 ```mermaid
 sequenceDiagram
     participant B as 운영 브라우저
     participant A as Admin API
     participant C as SummaryCache
-    participant S as AdminCommandService
-    participant L as 별도 admin lane
-    participant R as Room actor
-    participant D as 지속 audit
-    B->>A: GET 룸 요약
-    A->>A: 인증 · viewer 권한 검사
-    A->>C: 불변 요약 읽기
-    C-->>B: 요약 · updated_at · stale
-    B->>A: POST 조작 + idempotency key
-    A->>S: operator · CSRF · 대상 검사
-    S->>S: command / lane 용량 예약
-    S->>D: 접수 기록 저장 (actor 밖)
-    D-->>S: 저장 완료
-    S->>L: command_id로 등록
-    S-->>B: 202 Accepted + command_id
-    L->>R: 제한된 운영 명령 실행
-    R->>R: 현재 phase · membership 재검증
-    R-->>S: 실제 실행 결과
-    S->>D: 완료 기록 저장 (actor 밖)
-    B->>A: GET command_id
-    A-->>B: 실행 상태 · 결과 · audit 상태
+    B->>A: GET 서버와 룸 목록
+    A->>A: Basic viewer 인증
+    A->>C: 불변 cache 읽기
+    C-->>A: allowlist 자료와 게시 시각
+    A-->>B: JSON과 age_ms, stale
 ```
 
-## 9. 운영 명령·audit·drain
+## 9. 후속 운영 명령·audit·drain
 
 ### 접수와 실제 결과
 
@@ -548,8 +503,8 @@ internal/
     web.go
     web/
       index.html
-      app.js
-      style.css
+      dashboard.js
+      dashboard.css
   observability/
     summary.go
     metrics.go
@@ -568,7 +523,7 @@ internal/
 | 비밀번호 비용 | Argon2id 파라미터, hash worker 동시성·대기 한계, IP/session/room 실패 횟수·TTL; 실측 후 확정 |
 | 연결 | 최대 세션, 메시지 크기, 읽기·쓰기·입장 timeout |
 | 큐 | action, cleanup control, 중요 FIFO, 별도 admin lane 한계 |
-| 운영 조회 | summary 게시·polling 간격, stale 기준, 목록 개수 한계 |
+| 운영 조회 | 현재 summary/collector/runtime 1초, 완료 후 5초 polling, stale고정 5초, limit 1~100·offset 0~4096 |
 | 운영 조작 | 처리량, command store 크기·TTL, 인증·권한 설정 |
 | audit | 저장 위치, 작업 큐 한계, rotation, 오류 상태 |
 | 종료 | drain deadline, 연결/actor 대기 상한, audit flush 상한 |
@@ -584,7 +539,7 @@ internal/
 | 1 | 연결·guest·프로토콜·번호·public/private 룸·hash worker | 번호·비밀번호 입장, 정원과 one-room-per-session, host 승계·빈 룸 삭제 |
 | 2 | 이동·협동 GameHandler | 승인 입력 적용, match와 snapshot 계약 |
 | 3 | 실시간 동기화 | 실제 6클라이언트, tick·전송·보간 검증 |
-| 4 | 읽기 전용 대시보드 | 인증·권한, 불변 cache, stale 표시, 게임 영향 측정 |
+| 4 | 현재 읽기 전용 대시보드 | Basic viewer·불변 cache·stale·실제 6 WS 병행; 게임 부하 영향 미측정 |
 | 5 | 운영 조작 + 지속 audit | 202·실제 결과 구분, idempotency 경계, 권한·CSRF·audit 오류 |
 | 6 | drain·종료·운영 부하 | 입장 경합·큐 포화·종료 시간·로그 flush 검증 |
 

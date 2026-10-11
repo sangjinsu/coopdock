@@ -11,6 +11,16 @@
 예를 들어 6명 룸에 마지막 한 자리가 남았을 때 두 사람이 동시에 입장할 수 있다.
 성공 기준은 “요청 두 개를 받았다”가 아니라 한 사람만 들어가고 정원을 넘지 않는 것이다.
 
+## 현재 운영 조회 검증과 후속 시험의 구분
+
+현재 조회 MVP는 Basic viewer·미설정404·보호된 embed 자산, 정확한 allowlist JSON·nullable 지표, 전체 필터 뒤 pagination, cache-only HTTP, summary 게시에서 게임 revision/snapshot_seq 불변, 1초 heartbeat, source 지연 시 stale→recovery와 collector 종료를 deterministic 시험으로 확인한다. 아래 조작·audit·drain 항목은 후속 계획이며 현재 실행됐다는 뜻이 아니다.
+
+실제 서버 검증은 current source binary에서 native WebSocket 6개를 유지하며 대시보드의 연결6·membership6·WAITING→PLAYING·private·match와 5초 polling/수동 조회를 관찰한다. 별도로 기존 `roomcheck -movement`를 실제 서버에서 실행해 6 WS 동일 capture·입력 ACK·이동·정지·정리를 확인한다. 임의 fixture 수치를 실제 접속 수나 성능으로 보고하지 않는다. leading zero가 실제 무작위 번호에서 관찰되지 않으면 fixture/기존 계약 시험과 구분해 기록한다.
+
+UI mock fixture의 pagination·timeout·인증 purge·body abort·visibility 주입과 Node VM의 persisted pageshow 복구는 각각 독립 행위 시험이다. CSS zoom은 browser 메뉴 native zoom이 아니며 주입 visibility는 OS background 시험이 아니다. native Basic challenge 입력 UX·실제 OS throttle·메뉴200%zoom·실제 BFCache 적격성은 별도 관찰 없으면 미검증으로 남긴다. UI fixture 성공과 실제 Go HTTP/6 WS 증거를 구별한다.
+
+최종 fresh `go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...`, `go build ./...`, `git diff --check` 결과와 browser 근거·cleanup은 `work/dashboard/final-report.md`에 보존한다. 결과 보고서는 root 독립 검토·최종 Architect 판정과 별도다. CPU·RTT·표시지연·실제 게임 부하 영향·Godot QA·배포는 이번 검증에서 성공으로 확대하지 않는다.
+
 ## 룸과 연결이 사용자의 기대대로 동작하는가
 
 membership은 세션의 현재 룸 소속 관계, host는 방장, match는 한 번의 게임 실행이다.
@@ -39,7 +49,7 @@ membership은 세션의 현재 룸 소속 관계, host는 방장, match는 한 �
 | 닫힌 룸에 대기 요청·정리 도착 | 요청은 `ROOM_CLOSED`로 끝나고 중복 정리에도 상태가 꼬이지 않는다. |
 
 인원 표시와 실제 소속을 함께 관측한다. 초기 정책은 자동 재접속 복원 없음과 메모리 저장이다.
-재시작 후 게임 상태는 사라지고 persistent audit는 남는지 별도로 확인한다.
+현재 재시작 후 게임 상태는 사라진다. 후속 persistent audit 보존은 별도로 확인한다.
 
 ## 이동·협동 결과와 메시지 순서가 맞는가
 

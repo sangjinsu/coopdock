@@ -42,6 +42,39 @@ host가 시작하면 서버가 고정 tick으로 이동을 계산하고 전체 s
 중요 응답·이벤트는 유한 FIFO로 전달하고, 아직 보내지 않은 주기 snapshot은 최신 상태로 교체합니다.
 함께 제공하는 Go CLI로 실제 WebSocket 연결 6개의 입장·시작·이동·정지를 검사할 수 있습니다.
 
+**브라우저에서 읽는 운영 현황**
+
+같은 실행 파일에 포함된 조회 전용 대시보드로 서버 연결 수와 룸 참가 수, 공개·비공개 룸을 구분해 봅니다.
+운영 전용 Basic `viewer` 인증을 사용하며, 운영 HTTP 요청은 게시된 cache만 조회합니다.
+설정 방법은 [운영 가이드](docs/server-guide.md#운영-대시보드-켜기)에 있습니다.
+
+## 서버의 두 경로
+
+```mermaid
+flowchart LR
+    Client["게임 client"] --> WS["WebSocket transport"]
+    WS --> Manager["Manager admission gate"]
+    Manager --> Actor["Room actor"]
+    Actor --> Game["GameHandler: movement"]
+    Actor --> Outbox["reliable FIFO / latest snapshot"]
+    Outbox --> Client
+    Actor -.-> Summary["atomic room allowlist summary"]
+    Manager -.-> Collector["background collector: 1초"]
+    Summary -.-> Collector
+    WS -.-> Collector
+    Runtime["Go runtime sampler: 1초"] -.-> Collector
+    Collector --> Cache["immutable operations cache"]
+    Browser["운영 browser"] --> Auth["HTTP Basic viewer"]
+    Auth --> Admin["GET admin APIs / embed assets"]
+    Admin --> Cache
+    Admin --> Browser
+```
+
+게임 입력은 room actor가 처리하고, 운영 조회는 별도 수집기가 만든 불변 cache를 읽습니다.
+Actor→Outbox 선은 실제 `Session.Events`→transport outbox 단계를 요약합니다.
+Manager는 registry refs와 readiness, WS는 실제 live 연결 수를 수집기에 제공합니다.
+운영 GET에서 manager나 actor로 직접 조회하는 경로는 없습니다.
+
 ## 시작하기
 
 Go **1.26 이상**과 내려받은 저장소가 필요합니다. 저장소의 상위 폴더에서 실행합니다.
@@ -67,7 +100,7 @@ WebSocket JSON, 오류 코드, 환경변수, 종료 동작은 [서버 가이드]
 재연결은 새 guest로 시작합니다. 자동 재접속 복원은 제공하지 않습니다.
 
 현재 reference는 자유 공간에서의 이동을 다룹니다.
-지형·충돌·중력·협동 목표·승패, 운영 대시보드와 지속 audit는 후속 범위입니다.
+지형·충돌·중력·협동 목표·승패, 운영 상세·조작과 지속 audit는 후속 범위입니다.
 Godot 클라이언트·SDK·게임 화면·보간·예측과 배포 구성도 아직 구현하지 않았습니다.
 실제 운영 부하·수용 규모·화면 지연과 TCP 손실·jitter는 측정하지 않았습니다.
 
