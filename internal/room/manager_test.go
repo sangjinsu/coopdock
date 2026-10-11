@@ -3,10 +3,12 @@ package room
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func setup(t *testing.T, cfg Config) *Manager {
@@ -65,7 +67,9 @@ func TestCreateValidation(t *testing.T) {
 		{"invalidutf8", CreateOptions{Visibility: "private", Password: str("abcd\xff")}, "INVALID_MESSAGE"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			m := setup(t, DefaultConfig())
+			cfg := DefaultConfig()
+			cfg.hash = (&barrier{}).hash
+			m := setup(t, cfg)
 			r, e := m.Create(context.Background(), connect(t, m, "host"), tt.o)
 			code(t, e, tt.want)
 			if tt.want == "" && tt.o.Capacity == 0 && r.Capacity != 6 {
@@ -75,7 +79,9 @@ func TestCreateValidation(t *testing.T) {
 	}
 }
 func TestPrivateAdmission(t *testing.T) {
-	m := setup(t, DefaultConfig())
+	cfg := DefaultConfig()
+	cfg.hash = (&barrier{}).hash
+	m := setup(t, cfg)
 	r := create(t, m, connect(t, m, "host"), CreateOptions{Visibility: "private", Password: str(" 가 나 ")})
 	g := connect(t, m, "guest")
 	missingNumber := "000000"
@@ -94,6 +100,67 @@ func TestPrivateAdmission(t *testing.T) {
 		t.Fatal(ls, e)
 	}
 }
+
+func TestRequestDeadlineDuringHashCannotReplaceRejoin(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RequestTimeout = 250 * time.Millisecond
+	cfg.HashWorkers = 1
+	b := &barrier{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	cfg.hash = b.hash
+	m := setup(t, cfg)
+	t.Cleanup(func() {
+		select {
+		case <-b.release:
+		default:
+			close(b.release)
+		}
+	})
+	private := create(t, m, connect(t, m, "private-host"), CreateOptions{Visibility: "private", Password: str("abcd")})
+	host := connect(t, m, "public-host")
+	public := create(t, m, host, CreateOptions{})
+	guest := connect(t, m, "guest")
+	b.armed.Store(true)
+	pending := joinAsync(m, context.Background(), guest, private.RoomNumber)
+	await(t, b.entered)
+	err := awaitErr(t, pending)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("server request deadline returned %v, want context deadline exceeded", err)
+	}
+	code(t, err, "REQUEST_TIMEOUT")
+	guest.mu.Lock()
+	reserved := guest.room != nil || guest.joining
+	guest.mu.Unlock()
+	if reserved {
+		t.Fatal("deadline left a membership or reservation")
+	}
+	joined, err := m.Join(context.Background(), guest, JoinOptions{RoomNumber: public.RoomNumber})
+	if err != nil || len(joined.Members) != 2 || joined.HostID != host.ID() {
+		t.Fatalf("rejoin failed: %+v %v", joined, err)
+	}
+	guest.mu.Lock()
+	generation, token, currentRoom := guest.generation, guest.membershipToken, guest.room
+	guest.mu.Unlock()
+	b.armed.Store(false)
+	close(b.release)
+	// A successful private join on the single worker proves the expired hash has returned.
+	if _, err := m.Join(context.Background(), connect(t, m, "probe"), JoinOptions{RoomNumber: private.RoomNumber, Password: str("abcd")}); err != nil {
+		t.Fatal("worker did not finish the late hash before processing the next join", err)
+	}
+	rooms, err := m.ListPublic(context.Background())
+	if err != nil || len(rooms) != 1 {
+		t.Fatal(rooms, err)
+	}
+	got := rooms[0]
+	if got.RoomID != public.RoomID || len(got.Members) != 2 || got.Members[1].SessionID != guest.ID() || got.HostID != host.ID() || got.Revision != joined.Revision {
+		t.Fatalf("late hash changed the new membership: got=%+v joined=%+v", got, joined)
+	}
+	guest.mu.Lock()
+	defer guest.mu.Unlock()
+	if guest.room != currentRoom || guest.generation != generation || guest.membershipToken != token || guest.joining {
+		t.Fatal("late hash changed the current session membership")
+	}
+}
+
 func TestHostSuccessionAndEmptyRemoval(t *testing.T) {
 	m := setup(t, DefaultConfig())
 	h := connect(t, m, "h")
@@ -176,7 +243,9 @@ func TestOneSessionConcurrentRooms(t *testing.T) {
 	}
 }
 func TestSnapshotsContainNoSecrets(t *testing.T) {
-	m := setup(t, DefaultConfig())
+	cfg := DefaultConfig()
+	cfg.hash = (&barrier{}).hash
+	m := setup(t, cfg)
 	h := connect(t, m, "h")
 	secret := "secretword"
 	r := create(t, m, h, CreateOptions{Visibility: "private", Password: &secret})
