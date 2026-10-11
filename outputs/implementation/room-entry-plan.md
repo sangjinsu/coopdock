@@ -86,6 +86,8 @@ cd outputs/server
 
 **Files:** 위 표의 `go.mod`, `go.sum`, `internal/room/*.go`와 관련 test.
 
+Task 1은 실제 import하는 `golang.org/x/crypto v0.58.0`과 간접 dependency `golang.org/x/sys v0.49.0`만 추가하고 `go mod tidy`로 module 파일을 정리한다. 아직 사용하지 않는 WebSocket dependency는 Task 2가 추가한다.
+
 **Interfaces — producer 계약:** transport가 내부 mutex·actor·비밀번호 자료에 접근하지 않도록 다음 API를 시작점으로 사용한다. 구현 직전 core·transport worker가 함께 최종 signature를 확인하고 이 블록을 실제 코드와 일치시킨다.
 
 ```go
@@ -215,7 +217,9 @@ git commit -m "feat: add room creation and password admission core"
 
 ## Task 2: 실제 WebSocket 서버와 실행 안내
 
-**Files:** `internal/protocol/`, `internal/transport/`, `internal/config/`, `cmd/server/main.go`, `README.md`; 필요하면 실제 검증용 `cmd/roomcheck/main.go`를 포함한다.
+**Files:** `internal/protocol/`, `internal/transport/`, `internal/config/`, `cmd/server/main.go`, `README.md`, WebSocket dependency 추가에 필요한 `go.mod`, `go.sum`; 필요하면 실제 검증용 `cmd/roomcheck/main.go`를 포함한다.
+
+Task 1 커밋 이후 Task 2가 module 파일 소유권을 이어받아 실제 import하는 `github.com/coder/websocket v1.8.15`를 추가하고 `go mod tidy`로 정리한다. Task 1이 고정한 crypto dependency를 유지하며 변경한 module 파일도 Task 2 커밋에 명시 stage한다.
 
 **Interfaces — consumer 계약:** Task 1의 `room.NewManager`, `Connect`, `Create`, `Join`, `Leave`, `Disconnect`, `ListPublic`, `Ready`, `Close`, `Session.ID/Events`, `Snapshot`, `CodeOf`만 사용한다. 네트워크 내부 구현을 코어에 전달하지 않는다.
 
@@ -245,7 +249,7 @@ func (s *Server) Close(context.Context) error
 
 각 시험은 다음 입력을 보낸다: malformed JSON, 한 frame의 JSON 두 개, version `2`, request_id 누락·잘못된 타입, payload `null`·잘못된 타입, capacity `0`·`1.5`, visibility `""`, password 숫자, room_number 숫자·전각 숫자·5/7자리, public password `""`. 모두 `INVALID_MESSAGE`로 처리하고 크기 초과·허용되지 않은 Origin은 연결 또는 frame을 거부한다. capacity·visibility 기본값은 필드 누락 때만 적용한다.
 
-- [ ] **Step 2: 未実装でFAILすることを確認する。**
+- [ ] **Step 2: 미구현 상태에서 시험이 실패함을 확인한다.**
 
 ```bash
 go test ./internal/protocol ./internal/transport ./internal/config -count=1
@@ -293,7 +297,7 @@ go build -o bin/roomserver ./cmd/server
 - [ ] **Step 6: 독립 architect 검증 후 명시 stage하고 commit한다.** stage 전 diff에 실제 dependency·설정값·API와 문서가 일치하는지 확인하고 다른 worker 파일은 stage하지 않는다.
 
 ```bash
-git add outputs/server/internal/protocol outputs/server/internal/transport outputs/server/internal/config outputs/server/cmd/server outputs/server/README.md
+git add outputs/server/go.mod outputs/server/go.sum outputs/server/internal/protocol outputs/server/internal/transport outputs/server/internal/config outputs/server/cmd/server outputs/server/README.md
 git commit -m "feat: expose room entry over websocket with runnable server"
 ```
 
