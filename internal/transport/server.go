@@ -40,15 +40,16 @@ func (c Config) Validate() error {
 }
 
 type Server struct {
-	manager   *room.Manager
-	cfg       Config
-	mux       *http.ServeMux
-	mu        sync.Mutex
-	closing   bool
-	peers     map[*peer]struct{}
-	wg        sync.WaitGroup
-	closeOnce sync.Once
-	closed    chan struct{}
+	manager           *room.Manager
+	cfg               Config
+	mux               *http.ServeMux
+	mu                sync.Mutex
+	activeConnections int
+	closing           bool
+	peers             map[*peer]struct{}
+	wg                sync.WaitGroup
+	closeOnce         sync.Once
+	closed            chan struct{}
 	// Package-private barriers exercise lifecycle boundaries in integration tests.
 	beforeAccept  func()
 	beforeProcess func(context.Context, protocol.Request)
@@ -81,6 +82,11 @@ func New(m *room.Manager, c Config) (*Server, error) {
 	return s, nil
 }
 func (s *Server) Handler() http.Handler { return s.mux }
+func (s *Server) LiveStatus() (activeConnections int, stopping bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeConnections, s.closing
+}
 func (s *Server) accept(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if s.closing {
@@ -120,15 +126,20 @@ func (s *Server) accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.peers[p] = struct{}{}
+	p.counted = true
+	s.activeConnections++
 	afterRegister := s.afterRegister
 	s.mu.Unlock()
 	if afterRegister != nil {
 		afterRegister(p)
 	}
+	defer func() {
+		p.releaseLiveCount()
+		s.mu.Lock()
+		delete(s.peers, p)
+		s.mu.Unlock()
+	}()
 	p.run()
-	s.mu.Lock()
-	delete(s.peers, p)
-	s.mu.Unlock()
 }
 func (s *Server) Close(ctx context.Context) error {
 	s.closeOnce.Do(func() {
@@ -171,6 +182,7 @@ type peer struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	stopOnce        sync.Once
+	counted         bool // Protected by server.mu.
 	ingress         chan incoming
 	outbound        *outbox
 	roomID          string
@@ -183,7 +195,21 @@ type peer struct {
 	startRevision   uint64
 }
 
-func (p *peer) stop()                            { p.stopOnce.Do(func() { p.cancel(); p.conn.CloseNow() }) }
+func (p *peer) releaseLiveCount() {
+	p.server.mu.Lock()
+	if p.counted {
+		p.server.activeConnections--
+		p.counted = false
+	}
+	p.server.mu.Unlock()
+}
+func (p *peer) stop() {
+	p.stopOnce.Do(func() {
+		p.releaseLiveCount()
+		p.cancel()
+		p.conn.CloseNow()
+	})
+}
 func (p *peer) enqueue(v protocol.Envelope) bool { return p.enqueueBatch(false, v) }
 func (p *peer) enqueueBatch(clearLatest bool, messages ...protocol.Envelope) bool {
 	if p.ctx.Err() != nil {

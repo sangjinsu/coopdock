@@ -98,12 +98,13 @@ type Source struct {
     Transport func() (activeConnections int, stopping bool)
 }
 type Config struct {
-    Interval, StaleAfter time.Duration
+    Interval time.Duration
     now func() time.Time
     newTicker func(time.Duration) (<-chan time.Time, func())
     sampleRuntime func() (heapAllocBytes uint64, goroutines int)
 }
-func DefaultConfig() Config // Interval=1s, StaleAfter=5s
+const StaleAfter = 5 * time.Second
+func DefaultConfig() Config // Interval=1s
 func New(startupCtx context.Context, source Source, cfg Config) (*Collector, error)
 func (c *Collector) Load() Snapshot
 func (c *Collector) MarkStopping()
@@ -125,7 +126,7 @@ func (v Snapshot) Rooms() []room.OperationsSummary
 func AgeMillis(now, updated time.Time) int64
 ```
 
-`New`는 nil source 함수, Interval<=0, StaleAfter<=0를 비밀 없는 고정 오류로 거절한다. process instance ID는 crypto/rand.Text, StartedAt은 New 시점 원래 now다. 첫 runtime sample과 첫 source 수집이 모두 끝난 valid cache가 게시되기 전 New는 성공 반환하지 않는다. startupCtx가 취소되면 내부 cancel을 요청하고 error로 반환한다. 막힌 source를 기다리는 goroutine은 source release 뒤 정리될 수 있으며 강제로 중단했다고 주장하지 않는다. main은 첫 cache 성공 후에만 HTTP listen한다.
+`New`는 nil source 함수와 Interval<=0를 비밀 없는 고정 오류로 거절한다. process instance ID는 crypto/rand.Text, StartedAt은 New 시점 원래 now다. 첫 runtime sample과 첫 source 수집이 모두 끝난 valid cache가 게시되기 전 New는 성공 반환하지 않는다. startupCtx가 취소되면 내부 cancel을 요청하고 error로 반환한다. 막힌 source를 기다리는 goroutine은 source release 뒤 정리될 수 있으며 강제로 중단했다고 주장하지 않는다. main은 첫 cache 성공 후에만 HTTP listen한다.
 
 collector source worker와 runtime sampler는 각각 한 loop다. 첫 sample 이후 runtime sampler는 1초마다 ReadMemStats/NumGoroutine 결과를 immutable atomic slot에 게시한다. source worker는 수집 완료 후 현재 sample·정렬된 room 값으로 cache generation을 하나 증가시키며 atomic 교체한다. 매 source 호출당 goroutine 생성이나 무한 수집 대기는 없다. source callback이 막히면 기존 cache만 유지되고 HTTP age가 증가한다. registry 최대 4096 방은 기존 config 상한으로 제한하고 cache room slices는 그 범위 안이다.
 
@@ -133,7 +134,7 @@ collector source worker와 runtime sampler는 각각 한 loop다. 첫 sample 이
 
 Close는 한 번 cancel하고 ctx.Done 또는 두 worker 완료를 기다린다. source callback이 막힌 경우 호출자 context 오류를 반환하고 sampler는 종료한다. source release 후 source worker도 종료하고 다시 Close하면 nil이다. 취소 뒤 late source 결과를 새 cache로 게시하지 않는다. worker channel은 생산자가 완료 시 닫고 ticker Stop은 한 번만 실행한다.
 
-AgeMillis는 `now.Sub(updated)/time.Millisecond`, 음수는 0으로 clamp한다. monotonic 원본을 보존한다. JSON uptime도 now.Sub(StartedAt)으로 계산해 음수 0을 사용한다. cache stale와 각 room stale는 각각의 UpdatedAt으로 독립 계산한다.
+AgeMillis는 `now.Sub(updated)/time.Millisecond`, 음수는 0으로 clamp한다. monotonic 원본을 보존한다. JSON uptime도 now.Sub(StartedAt)으로 계산해 음수 0을 사용한다. cache stale와 각 room stale는 각각의 UpdatedAt으로 독립 계산한다. 고정 기준은 exported constant `observability.StaleAfter = 5 * time.Second`이며 runtime 설정·getter·Snapshot 필드는 추가하지 않는다.
 
 ### HTTP wire DTO와 query
 
@@ -355,7 +356,8 @@ git commit -m "feat: publish immutable room operation summaries"
 ```go
 var _ func(*room.Manager) room.OperationsSnapshot = (*room.Manager).OperationsSnapshot
 func (s *Server) LiveStatus() (activeConnections int, stopping bool)
-func DefaultConfig() Config
+const StaleAfter = 5 * time.Second
+func DefaultConfig() Config // Interval=1s
 func New(startupCtx context.Context, source Source, cfg Config) (*Collector, error)
 func (c *Collector) Load() Snapshot
 func (c *Collector) MarkStopping()
@@ -364,7 +366,7 @@ func (v Snapshot) Rooms() []room.OperationsSummary
 func AgeMillis(now, updated time.Time) int64
 ```
 
-첫 method expression은 room 소비 signature의 compile 확인용이다. room.OperationsSnapshot은 Ready bool과 Rooms []room.OperationsSummary다. room 요약은 RoomID/RoomNumber/Visibility/Phase/HostID string, Capacity/MemberCount int, MatchID *string, UpdatedAt time.Time만 담는다. Source는 `Rooms func() room.OperationsSnapshot`, `Transport func() (activeConnections int, stopping bool)`다. Config는 Interval/StaleAfter time.Duration과 private now/newTicker/sampleRuntime hooks다. Snapshot의 string identity, RUNNING/STOPPING State, bool Ready, int connection/member/room/phase counts, time.Time StartedAt/UpdatedAt, uint64 HeapAllocBytes/Generation, int Goroutines와 private room slice는 위 전역 declaration과 동일하다.
+첫 method expression은 room 소비 signature의 compile 확인용이다. room.OperationsSnapshot은 Ready bool과 Rooms []room.OperationsSummary다. room 요약은 RoomID/RoomNumber/Visibility/Phase/HostID string, Capacity/MemberCount int, MatchID *string, UpdatedAt time.Time만 담는다. Source는 `Rooms func() room.OperationsSnapshot`, `Transport func() (activeConnections int, stopping bool)`다. Config는 Interval time.Duration과 private now/newTicker/sampleRuntime hooks만 둔다. exported constant `StaleAfter = 5 * time.Second`가 고정 신선도 기준이며 New는 source 함수 nil과 Interval<=0만 검증한다. Snapshot의 string identity, RUNNING/STOPPING State, bool Ready, int connection/member/room/phase counts, time.Time StartedAt/UpdatedAt, uint64 HeapAllocBytes/Generation, int Goroutines와 private room slice는 위 전역 declaration과 동일하다.
 
 - [ ] **Step 1: live count RED.** 기존 beforeAccept barrier에서 manager.Connect만 완료한 동안 LiveStatus==0을 assert하고, upgrade+등록 후1, room.leave 뒤1, 반복 stop/cleanup 뒤0을 확인한다. afterRegister에서 stop과 Server.Close를 동시에 실행하는 table을 100회 반복하고 음수/중복 감소가 없음을 확인한다. failed websocket.Accept와 등록 직전 closing도0이어야 한다. 함수 stub를 `(0,false)`로 두면 정상 accepted count assertion이 행위 RED다.
 
@@ -484,7 +486,7 @@ func TestViewerTokenBounds(t *testing.T) {
 
 `TestAdminAuthAndRoutes` table은 disabled 전체 경로 404, active missing/wrong credentials401+challenge, valid viewer page/css/js/status/rooms200, HEAD 같은 status/빈 body, authenticated operator POST kick/close/drain403, known unsupported PUT405+Allow, unknown/detail/commands404와 모든 응답의 security headers를 검사한다. 시험 token은 fixture 값이며 환경 secret을 로그에 쓰지 않는다. Config.Load의 `t.Setenv("ADMIN_VIEWER_TOKEN", value)` table도 추가하고 기존 설정을 유지한다. 먼저 Config/handler stub에서 행위 RED를 확인하고 `go test ./internal/admin ./internal/config -count=1` 실행 뒤 digest 인증과 path dispatch를 구현한다.
 
-- [ ] **Step 2: query·JSON allowlist·cache-only RED→GREEN.** parseRoomsQuery는 url.Values의 각 key에 값이 정확히 하나인지 확인하고, strconv 변환 전에 숫자 byte를 검사한다. `r.URL.Query()`는 parse 오류를 버리므로 `url.ParseQuery(r.URL.RawQuery)`의 error를 먼저 검사한다. DTO builder에 넘길 now는 한 번만 읽어 age/stale/uptime/UTC를 계산한다.
+- [ ] **Step 2: query·JSON allowlist·cache-only RED→GREEN.** parseRoomsQuery는 url.Values의 각 key에 값이 정확히 하나인지 확인하고, strconv 변환 전에 숫자 byte를 검사한다. `r.URL.Query()`는 parse 오류를 버리므로 `url.ParseQuery(r.URL.RawQuery)`의 error를 먼저 검사한다. DTO builder에 넘길 now는 한 번만 읽어 age/stale/uptime/UTC를 계산한다. statusResponse와 roomsResponse는 cache 및 각 room의 stale을 `ageMillis >= observability.StaleAfter.Milliseconds()`로 계산해 공통 5초 상수를 사용한다.
 
 ```go
 func TestRoomsQueryBounds(t *testing.T) {
