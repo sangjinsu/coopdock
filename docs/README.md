@@ -12,6 +12,7 @@
 |---|---|
 | [빠른 시작](getting-started.md) | Go 준비, 서버 실행, 상태 확인, 실제 6개 연결 CLI 검사 |
 | [서버 사용·운영 가이드](server-guide.md) | 현재 룸·이동 계약, WebSocket JSON, 오류 코드, 모든 환경변수, 종료와 검증 |
+| [현재 서버 구조](architecture.md) | 게임 처리와 cache 기반 운영 조회의 내부 경로 |
 
 서버 가이드의 [메시지 예제](server-guide.md#실제-websocket-메시지),
 [3D 이동](server-guide.md#실시간-3d-reference-이동), [설정](server-guide.md#설정),
@@ -20,15 +21,15 @@
 ## 기능 스펙 — 목표와 정책
 
 기존 [기능별 스펙 목차](specs/README.md)는 게임을 만드는 사람과 운영하는 사람이 같은 규칙을 이해하기 위한 문서입니다.
-운영 대시보드·admin API·Godot 표시 등 후속 기능의 설명도 포함하므로 현재 제공 여부는 서버 가이드에서 확인하세요.
+현재 조회 전용 운영 대시보드·admin API와 후속 상세·조작·Godot 표시를 함께 다룹니다. 현재 제공 여부는 [서버 가이드의 현재 단계](server-guide.md#현재-단계)에서 확인하세요.
 
 | 문서 | 주제 |
 |---|---|
 | [01. 전체 개요와 이름 후보](specs/01-overview.md) | 전체 구성과 기술 선택 |
 | [02. 룸과 세션](specs/02-rooms-and-sessions.md) | 번호 입장, private 비밀번호, 시작·퇴장·재접속 정책 |
 | [03. 실시간 동기화](specs/03-realtime-sync.md) | 서버 계산과 snapshot, 향후 화면 보정 |
-| [04. 메시지와 API](specs/04-messages-and-api.md) | 게임 메시지와 후속 운영 API의 설계 |
-| [05. 운영 대시보드](specs/05-operations-dashboard.md) | 후속 운영 화면과 지표 |
+| [04. 메시지와 API](specs/04-messages-and-api.md) | 게임 메시지, 현재 조회 API와 후속 운영 API의 설계 |
+| [05. 운영 대시보드](specs/05-operations-dashboard.md) | 현재 조회 화면·지표와 후속 상세·조작 |
 | [06. 운영 조작과 서버 종료](specs/06-operations-and-shutdown.md) | 후속 kick·close·drain·audit 정책 |
 | [07. 구현 구조와 설정](specs/07-implementation-and-config.md) | 목표 모듈과 구현 순서 |
 | [08. 검증 기준](specs/08-validation.md) | 전체 목표의 검증 계획과 미측정 범위 |
@@ -45,6 +46,7 @@
 |---|---|
 | [룸 입장 구현 계획](implementation/room-entry-plan.md) | guest·룸·비밀번호·WebSocket 입장 기능 구현 |
 | [실시간 이동 구현 계획](implementation/realtime-movement-plan.md) | reference 3D 이동, tick·snapshot·ACK, 실제 6개 연결 검사 구현 |
+| [운영 대시보드 구현 계획](implementation/operations-dashboard-plan.md) | room summary·collector·인증된 조회 API·운영 화면 구현 |
 
 실행 계획은 작업 당시 기준 commit, 선택한 계약, 작업 단계와 완료 기록을 보존합니다.
 계획의 과거 범위나 로컬 검증 환경을 현재 배포 상태로 해석하지 마세요.

@@ -7,7 +7,7 @@ cd coopdock
 go run ./cmd/server
 ```
 
-처음 실행한다면 [빠른 시작](getting-started.md)을, 목표 기능과 후속 설계는 [기능별 스펙](specs/README.md)과 [전체 설계](go-room-server-design.md)를 참조하세요. 문서 전체는 [문서 길잡이](README.md)에서 찾을 수 있습니다.
+처음 실행한다면 [빠른 시작](getting-started.md)을, 목표 기능과 후속 설계는 [기능별 스펙](specs/README.md)과 [전체 설계](go-room-server-design.md)를 참조하세요. 게임 처리와 운영 조회의 내부 경로는 [현재 서버 구조](architecture.md)에 정리했습니다. 문서 전체는 [문서 길잡이](README.md)에서 찾을 수 있습니다.
 
 기본 주소는 `127.0.0.1:8080`입니다. 다른 주소가 필요하면 `HTTP_ADDR=127.0.0.1:9090 go run ./cmd/server`처럼 지정합니다.
 
@@ -243,7 +243,9 @@ go build ./...
 
 시험은 실제 `httptest` HTTP/WebSocket과 실제 룸 코어를 사용합니다. 정원·동시 입장·순서·재입장·host 승계·Origin·strict frame·read limit·timeout·reader 취소·queue 포화·종료 경합을 검사합니다. transport의 지연 검사는 package 내부 barrier로 수행하고 hash 진행 중 취소·늦은 결과는 코어의 별도 barrier 시험이 검사합니다.
 
-현재 프로젝트는 초기 reference 단계입니다. free-space reference 3D 이동과 서버 동기화는 구현했습니다. 게임별 지형·충돌·중력·협동 목표·승패, admin 상세·조작·commands, 지속 audit, Godot client·게임 화면·보간·예측, 자동 재접속 복원은 현재 미구현입니다. 실제 TCP 손실·jitter 주입, 운영 부하·수용 규모·UI 지연은 측정하지 않았습니다. deterministic barrier와 race 시험을 실제 네트워크 손실 시험이나 성능 보장으로 해석하지 않습니다. 미지원 WS op는 `INVALID_MESSAGE`입니다. 조회용 admin MVP는 위 인증 조건으로 제공하고 후속 admin 경로는 실행하지 않습니다. Godot은 후속 custom WebSocket + JSON client를 구현해야 합니다.
+## 현재 단계
+
+현재 프로젝트는 초기 reference 단계입니다. free-space reference 3D 이동과 서버 동기화는 구현했습니다. 게임별 지형·충돌·중력·협동 목표·승패, admin 상세·조작·commands, 지속 audit, Godot client·SDK·게임 화면·보간·예측, 배포 구성, 자동 재접속 복원은 현재 미구현입니다. 실제 TCP 손실·jitter 주입, 운영 부하·수용 규모·UI 지연은 측정하지 않았습니다. deterministic barrier와 race 시험을 실제 네트워크 손실 시험이나 성능 보장으로 해석하지 않습니다. 미지원 WS op는 `INVALID_MESSAGE`입니다. 조회용 admin MVP는 위 인증 조건으로 제공하고 후속 admin 경로는 실행하지 않습니다. Godot은 후속 custom WebSocket + JSON client를 구현해야 합니다.
 
 ## 고정한 dependency와 공식 자료
 

@@ -1,118 +1,40 @@
-# CoopDock
+# CoopDock · 코옵독
 
-**Small rooms. Shared worlds. Server-owned truth.**
+**친구와 모이고, 같은 세계에서 함께 플레이하세요.**
 
-CoopDock(코옵독)은 **1~6명이 번호로 모여 함께 플레이하는 협동 게임**을 위한 Go 서버 프로젝트입니다.
-룸 입장부터 서버 권위 3D 이동까지, 작은 협동 게임의 연결과 상태 흐름을 직접 실행하고 확인할 수 있습니다.
+CoopDock은 **1~6인 룸형 협동 게임을 위한 Go 서버 프로젝트**입니다.
+6자리 룸 번호로 친구를 초대하고, 서버가 계산한 상태를 함께 공유하는 게임의 기반을 만듭니다.
 
-친구에게 6자리 룸 번호를 알려 주고, 같은 방에서 준비한 뒤 host가 게임을 시작합니다.
-클라이언트는 이동 방향을 보내고, 서버가 계산한 위치와 속도를 모든 참가자가 공유합니다.
-현재는 게임 규칙을 발전시키기 위한 **초기 reference 구현**입니다.
+## 작은 협동 게임을 위한 출발점
 
-## 이런 프로젝트에 어울립니다
+- **번호로 모이는 룸** — 공개 룸과 비밀번호가 있는 프라이빗 룸으로 플레이어를 모읍니다.
+- **서버 권위 3D 이동** — 클라이언트의 이동 방향을 받아 서버가 위치와 속도를 계산하고 참가자에게 공유합니다.
+- **한눈에 보는 운영 현황** — 브라우저의 조회 전용 대시보드에서 연결 수와 룸 상태를 확인합니다.
+- **직접 확인하는 연결 흐름** — Go CLI로 실제 WebSocket 연결 6개의 입장·시작·이동·정지를 검사할 수 있습니다.
 
-- 소수의 친구가 번호로 모이는 룸형 협동 게임.
-- 공개 룸과 비밀번호로 입장하는 private 룸이 필요한 프로토타입.
-- 클라이언트가 보낸 위치 대신 서버가 판정한 상태를 사용하는 게임.
-- Godot에서 custom WebSocket + JSON 연결을 직접 구성하려는 프로젝트.
+Go 서버부터 시작하고, 이후 Godot 클라이언트로 협동 게임을 만드는 방향을 지향합니다.
+현재는 룸 입장과 자유 공간 이동, 운영 조회를 제공하는 **초기 reference 구현**입니다.
+게임 규칙과 Godot 클라이언트는 후속 개발 범위이며, 자세한 범위는 [현재 단계](docs/server-guide.md#현재-단계)에서 확인하세요.
 
-## 지금 제공하는 것
-
-**모이기 쉬운 룸**
-
-연결마다 guest 세션을 발급하고, ASCII 숫자 6자리 룸 번호로 입장합니다.
-공개 목록, 1~6명 정원, private 비밀번호 확인을 지원합니다.
-private 비밀번호는 무작위 salt와 Argon2id hash로 관리합니다.
-
-**끊김까지 다루는 참가 관계**
-
-한 연결은 한 룸에 속합니다. 생성자는 자동 입장하고 host가 됩니다.
-host가 나가면 입장 순서에 따라 권한을 넘기고, 마지막 참가자가 나가면 룸을 정리합니다.
-게임 중 참가자가 나가면 해당 player와 미적용 입력도 정리합니다.
-
-**서버가 계산하는 3D 이동**
-
-host가 시작하면 서버가 고정 tick으로 이동을 계산하고 전체 snapshot을 전송합니다.
-방향 입력은 다음 변경까지 유지되며, 영벡터 입력으로 정지합니다.
-입력 ACK는 해당 방향 적용과 tick 계산이 성공한 뒤에 보냅니다.
-기본 계산은 30Hz, snapshot은 15Hz이며 실제 처리 성능과 도착 지연을 보장하는 수치는 아닙니다.
-
-**실행해서 확인하는 동기화**
-
-중요 응답·이벤트는 유한 FIFO로 전달하고, 아직 보내지 않은 주기 snapshot은 최신 상태로 교체합니다.
-함께 제공하는 Go CLI로 실제 WebSocket 연결 6개의 입장·시작·이동·정지를 검사할 수 있습니다.
-
-**브라우저에서 읽는 운영 현황**
-
-같은 실행 파일에 포함된 조회 전용 대시보드로 서버 연결 수와 룸 참가 수, 공개·비공개 룸을 구분해 봅니다.
-운영 전용 Basic `viewer` 인증을 사용하며, 운영 HTTP 요청은 게시된 cache만 조회합니다.
-설정 방법은 [운영 가이드](docs/server-guide.md#운영-대시보드-켜기)에 있습니다.
-
-## 서버의 두 경로
+## 어떻게 연결되나요?
 
 ```mermaid
 flowchart LR
-    Client["게임 client"] --> WS["WebSocket transport"]
-    WS --> Manager["Manager admission gate"]
-    Manager --> Actor["Room actor"]
-    Actor --> Game["GameHandler: movement"]
-    Actor --> Outbox["reliable FIFO / latest snapshot"]
-    Outbox --> Client
-    Actor -.-> Summary["atomic room allowlist summary"]
-    Manager -.-> Collector["background collector: 1초"]
-    Summary -.-> Collector
-    WS -.-> Collector
-    Runtime["Go runtime sampler: 1초"] -.-> Collector
-    Collector --> Cache["immutable operations cache"]
-    Browser["운영 browser"] --> Auth["HTTP Basic viewer"]
-    Auth --> Admin["GET admin APIs / embed assets"]
-    Admin --> Cache
-    Admin --> Browser
+    Client["게임 클라이언트"] <-->|"입력 · 상태"| Server["CoopDock 서버"]
+    Server -->|"운영 현황"| Dashboard["조회 전용 운영 대시보드"]
 ```
 
-게임 입력은 room actor가 처리하고, 운영 조회는 별도 수집기가 만든 불변 cache를 읽습니다.
-Actor→Outbox 선은 실제 `Session.Events`→transport outbox 단계를 요약합니다.
-Manager는 registry refs와 readiness, WS는 실제 live 연결 수를 수집기에 제공합니다.
-운영 GET에서 manager나 actor로 직접 조회하는 경로는 없습니다.
+클라이언트는 입력을 보내고 서버의 상태를 받습니다.
+운영 대시보드는 서버 현황을 조회합니다. 내부 경로는 [현재 서버 구조](docs/architecture.md)에 정리했습니다.
 
-## 시작하기
+## 시작해 보세요
 
-Go **1.26 이상**과 내려받은 저장소가 필요합니다. 저장소의 상위 폴더에서 실행합니다.
+Go **1.26 이상**을 준비하고 [빠른 시작](docs/getting-started.md)을 따라 서버와 6개 연결 검사를 실행하세요.
+운영 화면을 보려면 [대시보드 켜기](docs/server-guide.md#운영-대시보드-켜기)를 확인하세요.
 
-```bash
-cd coopdock
-go run ./cmd/server
-```
-
-기본 주소는 `127.0.0.1:8080`, 게임 연결은 `ws://127.0.0.1:8080/ws`입니다.
-서버를 켜 둔 채 다른 터미널에서 저장소 루트로 이동해 검사합니다.
-
-```bash
-go run ./cmd/roomcheck -url ws://127.0.0.1:8080/ws -movement -timeout 30s
-```
-
-[빠른 시작](docs/getting-started.md)에서 상태 확인과 실행 결과를 확인할 수 있습니다.
-WebSocket JSON, 오류 코드, 환경변수, 종료 동작은 [서버 가이드](docs/server-guide.md)에 있습니다.
-
-## 현재 단계
-
-단일 프로세스의 메모리 서버입니다. 재시작하면 룸과 세션 상태가 사라지고,
-재연결은 새 guest로 시작합니다. 자동 재접속 복원은 제공하지 않습니다.
-
-현재 reference는 자유 공간에서의 이동을 다룹니다.
-지형·충돌·중력·협동 목표·승패, 운영 상세·조작과 지속 audit는 후속 범위입니다.
-Godot 클라이언트·SDK·게임 화면·보간·예측과 배포 구성도 아직 구현하지 않았습니다.
-실제 운영 부하·수용 규모·화면 지연과 TCP 손실·jitter는 측정하지 않았습니다.
-
-## 문서 둘러보기
-
-| 문서 | 읽을 때 |
+| 문서 | 찾을 수 있는 내용 |
 |---|---|
-| [문서 길잡이](docs/README.md) | 사용법·스펙·설계·구현 기록을 한곳에서 찾을 때 |
-| [빠른 시작](docs/getting-started.md) | 서버를 실행하고 6개 연결 검사를 해 볼 때 |
-| [서버 사용·운영 가이드](docs/server-guide.md) | 현재 구현의 메시지 계약과 설정을 확인할 때 |
-| [기능별 스펙](docs/specs/README.md) | 룸·동기화·운영 기능의 목표와 정책을 이해할 때 |
-| [전체 설계](docs/go-room-server-design.md) | 모듈 경계와 전체 계약을 자세히 볼 때 |
-
-기능 스펙과 전체 설계에는 후속 개발 항목도 포함되어 있습니다.
-현재 동작은 서버 가이드에서, 각 작업의 계획과 기록은 문서 길잡이에서 확인하세요.
+| [빠른 시작](docs/getting-started.md) | 준비부터 로컬 실행과 연결 검사까지 |
+| [서버 사용·운영 가이드](docs/server-guide.md) | 현재 동작, 메시지 예제, 설정과 검증 |
+| [현재 서버 구조](docs/architecture.md) | 게임 처리와 운영 조회의 내부 경로 |
+| [문서 길잡이](docs/README.md) | 기능 스펙, 전체 설계와 구현 기록 |
