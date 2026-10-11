@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- 구현 위치는 `outputs/server`; Go module 이름 `roomserver`는 내부 module 식별자이며 제품 이름 확정이 아니다.
+- CoopDock(코옵독)을 작업 프로젝트명으로 사용하며 구현 위치는 `outputs/coopdock`이다. Go module 이름 `roomserver`는 내부 module 식별자로 유지한다.
 - local Go는 `1.27.2 darwin/arm64`로 확인했다. dependency의 최소 요구 버전에 따라 `go.mod`는 Go `1.26.0`을 사용한다.
 - 룸당 정원 `1~6명`, 미지정 기본 `6`; 번호는 ASCII 숫자 `6자리` 문자열이며 선행 0을 유지한다.
 - 기본 공개 여부는 `public`; `private`는 생성자 지정 비밀번호, public 생성에서 password 필드가 있으면 `INVALID_MESSAGE`다.
@@ -40,7 +40,7 @@
 
 | 파일 | 책임 |
 |---|---|
-| `outputs/server/go.mod`, `go.sum` | 공식 문서로 확인한 dependency와 Go 요구 버전 |
+| `outputs/coopdock/go.mod`, `go.sum` | 공식 문서로 확인한 dependency와 Go 요구 버전 |
 | `internal/room/types.go`, `errors.go` | transport가 사용하는 옵션·snapshot·오류 계약 |
 | `internal/room/manager.go`, `actor.go` | 번호 registry, admission, 룸 actor, host·정원·정리 |
 | `internal/room/session.go` | 연결 상태, 예약 generation, 현재 membership; room 공개 API 뒤에 유지 |
@@ -51,7 +51,7 @@
 | `internal/config/config.go`, `config_test.go` | 환경변수와 실제 상한·timeout 검사 |
 | `cmd/server/main.go`, `README.md` | 실행 프로그램, 설정·프로토콜·검증 안내 |
 
-위 경로는 모두 `outputs/server/` 기준이다. 파일 분할을 바꿀 때 producer·consumer API를 함께 갱신하고 중복 session 패키지를 만들지 않는다.
+위 경로는 모두 `outputs/coopdock/` 기준이다. 파일 분할을 바꿀 때 producer·consumer API를 함께 갱신하고 중복 session 패키지를 만들지 않는다.
 
 ## 로컬 설정 제안과 확정 기준
 
@@ -79,7 +79,7 @@ export GOCACHE="$PWD/work/go-build"
 export GOMODCACHE="$PWD/work/go-mod"
 export GOTMPDIR="$PWD/work/tmp"
 export GOTOOLCHAIN=local
-cd outputs/server
+cd outputs/coopdock
 ```
 
 ## Task 1: 룸 코어와 안전한 private 입장
@@ -212,7 +212,7 @@ go vet ./internal/room
 - [x] **Step 6: 독립 검토 후 작업 파일만 commit한다.** core worker가 ownership을 가진 Go 파일과 module 파일만 stage한다. parent는 producer API와 시험 근거를 확인한다.
 
 ```bash
-git add outputs/server/go.mod outputs/server/go.sum outputs/server/internal/room
+git add outputs/coopdock/go.mod outputs/coopdock/go.sum outputs/coopdock/internal/room
 git commit -m "feat: add room creation and password admission core"
 ```
 
@@ -298,7 +298,7 @@ go build -o bin/roomserver ./cmd/server
 - [x] **Step 6: 독립 architect 검증 후 명시 stage하고 commit한다.** stage 전 diff에 실제 dependency·설정값·API와 문서가 일치하는지 확인하고 다른 worker 파일은 stage하지 않는다.
 
 ```bash
-git add outputs/server/go.mod outputs/server/go.sum outputs/server/internal/protocol outputs/server/internal/transport outputs/server/internal/config outputs/server/cmd/server outputs/server/README.md
+git add outputs/coopdock/go.mod outputs/coopdock/go.sum outputs/coopdock/internal/protocol outputs/coopdock/internal/transport outputs/coopdock/internal/config outputs/coopdock/cmd/server outputs/coopdock/README.md
 git commit -m "feat: expose room entry over websocket with runnable server"
 ```
 

@@ -3,8 +3,8 @@ work/
 .gstack/
 .remember/
 .DS_Store
-outputs/server/bin/
-outputs/server/.cache/
-outputs/server/go-build/
-outputs/server/go-mod/
-outputs/server/tmp/
+outputs/coopdock/bin/
+outputs/coopdock/.cache/
+outputs/coopdock/go-build/
+outputs/coopdock/go-mod/
+outputs/coopdock/tmp/
