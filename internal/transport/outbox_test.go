@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"reflect"
 	"roomserver/internal/protocol"
 	"testing"
 )
@@ -56,16 +57,28 @@ func TestOutboxAtomicBatchAndReliableFence(t *testing.T) {
 	if !box.reliable(false, protocol.Event("ack", 1)) || box.beginSnapshotWrite(epoch) {
 		t.Fatal("snapshot started ahead of queued reliable")
 	}
+	box.snapshot(protocol.Event("game.snapshot", 9))
+	box.mu.Lock()
+	beforeQueue := append([]protocol.Envelope(nil), box.reliableQueue...)
+	beforeLatest, beforeEpoch := *box.latest, box.epoch
+	box.mu.Unlock()
 	if box.reliable(true, protocol.Event("game.ended", 1), protocol.Event("room.state", 2)) {
 		t.Fatal("partial batch accepted")
+	}
+	box.mu.Lock()
+	unchanged := reflect.DeepEqual(box.reliableQueue, beforeQueue) && box.latest != nil && reflect.DeepEqual(*box.latest, beforeLatest) && box.epoch == beforeEpoch
+	box.mu.Unlock()
+	if !unchanged {
+		t.Fatal("rejected batch changed queue/latest/epoch")
 	}
 	got, _, _ := box.next(context.Background())
 	if got.Op != "ack" {
 		t.Fatal("atomic failure changed FIFO")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, _, ok := box.next(ctx); ok {
+	box.mu.Lock()
+	remaining := len(box.reliableQueue)
+	box.mu.Unlock()
+	if remaining != 0 {
 		t.Fatal("failed batch partially published")
 	}
 }

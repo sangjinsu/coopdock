@@ -263,8 +263,8 @@ func (r *actor) tick() {
 		return
 	}
 	// Defer overflow membership hooks until this tick's complete publication boundary.
-	r.publishingTick = true
-	defer r.flushSlowMembers()
+	r.publicationDepth++
+	defer r.finishPublication()
 	r.drainInputs()
 	n := min(len(r.pending), r.manager.cfg.InputsPerTick)
 	batch := append([]receipt(nil), r.pending[:n]...)

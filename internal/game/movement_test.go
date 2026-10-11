@@ -250,3 +250,30 @@ func startedMovement(t *testing.T, ids ...string) GameHandler {
 	}
 	return h
 }
+
+// Rejecting dt must preserve a moving player's position, velocity, and pending change.
+func TestMovementInvalidDurationWhileMoving(t *testing.T) {
+	for _, dt := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		h := startedMovement(t, "a")
+		if err := h.Apply("a", Action{Type: "move", Direction: Vec3{X: 1}}); err != nil {
+			t.Fatal(err)
+		}
+		before := h.Snapshot()
+		if before.Players[0].Velocity != (Vec3{X: 5}) {
+			t.Fatal("fixture is not moving")
+		}
+		if _, err := h.Tick(dt); err == nil {
+			t.Fatalf("accepted %v", dt)
+		}
+		if !reflect.DeepEqual(h.Snapshot(), before) {
+			t.Fatalf("invalid dt %v changed moving state", dt)
+		}
+		if !h.(*movement).dirty {
+			t.Fatal("invalid dt consumed pending velocity update")
+		}
+		out, err := h.Tick(0.2)
+		if err != nil || !out.Changed || h.Snapshot().Players[0].Position != (Vec3{X: 1}) {
+			t.Fatalf("valid follow-up tick: %+v %v", out, err)
+		}
+	}
+}

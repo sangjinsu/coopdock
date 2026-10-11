@@ -296,7 +296,8 @@ func (p *peer) processEvent(event room.Event) bool {
 	case "room.state":
 		if state.RoomID == p.roomID && state.Revision > p.minRevision {
 			p.minRevision = state.Revision
-			return p.enqueue(protocol.Event("room.state", state))
+			p.snapshotSeq = max(p.snapshotSeq, state.SnapshotSeq)
+			return p.enqueueBatch(true, protocol.Event("room.state", state))
 		}
 	case "game.started":
 		if state.RoomID != p.roomID || state.MatchID == nil {
@@ -330,6 +331,29 @@ func (p *peer) processEvent(event room.Event) bool {
 	}
 	return true
 }
+
+// The matching core start is the FIFO publication barrier for a successful self-start.
+// Earlier terminal events may arrive while Manager.Start is waiting on the actor.
+func (p *peer) publishSelfStart(state room.Snapshot, response protocol.Envelope) bool {
+	for {
+		select {
+		case <-p.ctx.Done():
+			return false
+		case <-p.session.Done():
+			return false
+		case event := <-p.session.Events():
+			if event.Op == "game.started" && p.currentEvent(event) && event.Snapshot.RoomID == state.RoomID &&
+				event.Snapshot.MatchID != nil && *event.Snapshot.MatchID == *state.MatchID && event.Snapshot.Revision == state.Revision {
+				p.rememberStart(state)
+				return p.enqueueBatch(true, response, protocol.Event("game.started", map[string]any{"snapshot": state}), protocol.Event("room.state", state))
+			}
+			if !p.processEvent(event) {
+				return false
+			}
+		}
+	}
+}
+
 func (p *peer) processSnapshot() {
 	state, ok := p.session.TakeSnapshot()
 	if !ok {
@@ -429,8 +453,7 @@ func (p *peer) processor() {
 					return
 				}
 			case "room.start":
-				p.rememberStart(state)
-				if !p.enqueueBatch(true, response, protocol.Event("game.started", map[string]any{"snapshot": state}), protocol.Event("room.state", state)) {
+				if !p.publishSelfStart(state, response) {
 					return
 				}
 			case "room.leave":

@@ -49,7 +49,8 @@ type actor struct {
 	inputs                 chan receipt
 	inputSlots             chan struct{}
 	pending                []receipt
-	publishingTick         bool
+	publicationDepth       int
+	flushingSlow           bool
 	slowMembers            []memberEntry
 }
 
@@ -121,6 +122,9 @@ func (r *actor) remove(s *Session, roomID string, token uint64) bool {
 	if !removed {
 		return false
 	}
+	// Keep canceled receipts, all leave events, and the explicit end in one publication scope.
+	r.publicationDepth++
+	defer r.finishPublication()
 	r.cancelInputs(func(in receipt) bool { return in.s == s && in.token == token })
 	if r.handler != nil {
 		out, err := r.handler.OnLeave(s.id)
@@ -138,8 +142,8 @@ func (r *actor) remove(s *Session, roomID string, token uint64) bool {
 	return true
 }
 func (r *actor) closeSlow(entry memberEntry) {
-	if r.publishingTick {
-		// A tick publishes all completions and game events before any overflow hook can end it.
+	if r.publicationDepth > 0 {
+		// Nested tick/leave publication defers membership hooks until the outer scope finishes.
 		for _, queued := range r.slowMembers {
 			if queued == entry {
 				return
@@ -153,6 +157,11 @@ func (r *actor) closeSlow(entry memberEntry) {
 	m := r.manager
 	m.mu.Lock()
 	s.mu.Lock()
+	if s.room != nil && (s.room != r || s.membershipToken != entry.token) {
+		s.mu.Unlock()
+		m.mu.Unlock()
+		return
+	}
 	if !s.closed {
 		s.closed = true
 		s.generation++
@@ -164,14 +173,24 @@ func (r *actor) closeSlow(entry memberEntry) {
 	m.mu.Unlock()
 	r.remove(s, r.id, entry.token)
 }
-func (r *actor) flushSlowMembers() {
-	r.publishingTick = false
-	slow := r.slowMembers
-	r.slowMembers = nil
-	for _, entry := range slow {
-		r.closeSlow(entry)
+func (r *actor) finishPublication() {
+	r.publicationDepth--
+	if r.publicationDepth != 0 || r.flushingSlow {
+		return
 	}
-	if len(slow) > 0 && len(r.members) > 0 {
+	r.flushingSlow = true
+	changed := false
+	// Removal can publish another outcome and queue more slow members. Drain iteratively.
+	for len(r.slowMembers) > 0 {
+		slow := r.slowMembers
+		r.slowMembers = nil
+		changed = true
+		for _, entry := range slow {
+			r.closeSlow(entry)
+		}
+	}
+	r.flushingSlow = false
+	if changed && len(r.members) > 0 {
 		r.broadcast()
 	}
 }
@@ -208,7 +227,7 @@ func (r *actor) broadcastEvent(e Event) {
 	for _, entry := range slow {
 		r.closeSlow(entry)
 	}
-	if len(slow) > 0 && len(r.members) > 0 && !r.publishingTick {
+	if len(slow) > 0 && len(r.members) > 0 && r.publicationDepth == 0 && !r.flushingSlow {
 		r.broadcast()
 	}
 }
@@ -228,7 +247,7 @@ func (r *actor) broadcast() {
 		for _, entry := range slow {
 			r.closeSlow(entry)
 		}
-		if len(r.members) == 0 {
+		if len(r.members) == 0 || r.publicationDepth > 0 {
 			return
 		}
 	}

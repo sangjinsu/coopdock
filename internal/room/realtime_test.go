@@ -779,3 +779,194 @@ func TestTickOverflowPublishesAllAcksAndEventsBeforeLeaveEnd(t *testing.T) {
 		t.Fatal("overflow completion leaked receipt credit")
 	}
 }
+
+type leaveOutcomeHandler struct {
+	game.GameHandler
+	original string
+	reason   string
+	calls    atomic.Int32
+}
+
+func (h *leaveOutcomeHandler) OnLeave(id string) (game.Outcome, error) {
+	h.calls.Add(1)
+	out, err := h.GameHandler.OnLeave(id)
+	if id == h.original {
+		out.Events = []game.Event{{Type: "leave-first", SessionID: id}, {Type: "leave-second", SessionID: id}}
+		out.EndReason = h.reason
+	} else {
+		out.EndReason = "slow-left"
+	}
+	return out, err
+}
+func TestLeaveOverflowPreservesOutcomeEvents(t *testing.T) {
+	for _, reason := range []string{"", "original-left"} {
+		t.Run(reason, func(t *testing.T) {
+			handler := &leaveOutcomeHandler{GameHandler: game.NewMovement(), reason: reason}
+			m, clock := realtimeSetup(t, func(c *Config) { c.HandlerFactory = func() game.GameHandler { return handler } })
+			a := connect(t, m, "leaving")
+			base := create(t, m, a, CreateOptions{})
+			b, c := connect(t, m, "slow"), connect(t, m, "healthy")
+			for _, s := range []*Session{b, c} {
+				if _, err := m.Join(context.Background(), s, JoinOptions{RoomNumber: base.RoomNumber}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			handler.original = a.ID()
+			startMatch(t, m, a)
+			awaitGameEvent(t, b, "game.started")
+			awaitGameEvent(t, c, "game.started")
+			if _, err := m.ListPublic(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			for len(b.events) < cap(b.events) {
+				b.events <- Event{Op: "backlog"}
+			}
+			if err := m.Leave(context.Background(), a); err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"leave-first", "leave-second"} {
+				select {
+				case got := <-c.Events():
+					if got.Op != "game.event" || got.GameEvent == nil || got.GameEvent.Type != want {
+						t.Fatalf("OnLeave publication interrupted: got %s, wanted game.event %s", got.Op, want)
+					}
+				case <-time.After(time.Second):
+					t.Fatalf("missing %s", want)
+				}
+			}
+
+			ended := awaitGameEvent(t, c, "game.ended")
+			wantReason, wantCalls := "slow-left", int32(2)
+			if reason != "" {
+				wantReason, wantCalls = reason, 1
+			}
+			if ended.Ended == nil || ended.Ended.Reason != wantReason {
+				t.Fatalf("original reason lost: %+v", ended.Ended)
+			}
+			rooms, err := m.ListPublic(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rooms) != 1 || len(rooms[0].Members) != 1 || rooms[0].HostID != c.ID() {
+				t.Fatal("overflow cleanup incomplete")
+			}
+			if handler.calls.Load() != wantCalls {
+				t.Fatalf("unexpected reentrant/duplicate hooks: %d", handler.calls.Load())
+			}
+			if clock.tickStops.Load() != 1 || clock.snapshotStops.Load() != 1 {
+				t.Fatal("tickers stopped more than once")
+			}
+			await(t, b.Done())
+		})
+	}
+}
+
+// Cleanup of two slow peers must not reenter a leave outcome or invoke a hook twice.
+type nestedLeaveHandler struct {
+	game.GameHandler
+	names map[string]string
+	calls map[string]int
+}
+
+func (h *nestedLeaveHandler) OnLeave(id string) (game.Outcome, error) {
+	h.calls[id]++
+	out, err := h.GameHandler.OnLeave(id)
+	name := h.names[id]
+	if name == "last-slow" {
+		out.EndReason = "nested-left"
+	} else {
+		out.Events = []game.Event{{Type: name + "-first"}, {Type: name + "-second"}}
+	}
+	return out, err
+}
+func TestNestedLeaveOverflowPreservesPublication(t *testing.T) {
+	h := &nestedLeaveHandler{GameHandler: game.NewMovement(), names: map[string]string{}, calls: map[string]int{}}
+	m, clock := realtimeSetup(t, func(c *Config) { c.HandlerFactory = func() game.GameHandler { return h } })
+	a := connect(t, m, "leaving")
+	base := create(t, m, a, CreateOptions{})
+	b, c, d := connect(t, m, "slow-b"), connect(t, m, "slow-c"), connect(t, m, "healthy")
+	for _, s := range []*Session{b, c, d} {
+		if _, err := m.Join(context.Background(), s, JoinOptions{RoomNumber: base.RoomNumber}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.names[a.ID()], h.names[b.ID()], h.names[c.ID()] = "original", "nested", "last-slow"
+	started := startMatch(t, m, a)
+	for _, s := range []*Session{b, c, d} {
+		awaitGameEvent(t, s, "game.started")
+	}
+	if _, err := m.ListPublic(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []*Session{b, c} {
+		for len(s.events) < cap(s.events) {
+			s.events <- Event{Op: "backlog"}
+		}
+	}
+	if err := m.Leave(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"original-first", "original-second", "nested-first", "nested-second"} {
+		select {
+		case e := <-d.Events():
+			if e.Op != "game.event" || e.GameEvent == nil || e.GameEvent.Type != want || e.GameEvent.MatchID != *started.MatchID {
+				t.Fatalf("nested publication: got %+v want %s", e, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("missing %s", want)
+		}
+	}
+	ended := awaitGameEvent(t, d, "game.ended")
+	if ended.Ended == nil || ended.Ended.Reason != "nested-left" {
+		t.Fatal("nested end reason lost")
+	}
+	rooms, err := m.ListPublic(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rooms) != 1 || len(rooms[0].Members) != 1 || rooms[0].HostID != d.ID() {
+		t.Fatal("nested cleanup incomplete")
+	}
+	for _, s := range []*Session{a, b, c} {
+		if h.calls[s.ID()] != 1 {
+			t.Fatal("duplicate leave hook")
+		}
+	}
+	if clock.tickStops.Load() != 1 || clock.snapshotStops.Load() != 1 {
+		t.Fatal("duplicate ticker stop")
+	}
+}
+
+// A deferred cancellation overflow still closes the departed session and returns its input credit.
+func TestLeaveCancellationOverflowClosesDepartedSession(t *testing.T) {
+	m, _ := realtimeSetup(t, nil)
+	a := connect(t, m, "leaving")
+	base := create(t, m, a, CreateOptions{})
+	b := connect(t, m, "healthy")
+	if _, err := m.Join(context.Background(), b, JoinOptions{RoomNumber: base.RoomNumber}); err != nil {
+		t.Fatal(err)
+	}
+	started := startMatch(t, m, a)
+	awaitGameEvent(t, b, "game.started")
+	if _, err := m.ListPublic(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	r := a.room
+	a.mu.Unlock()
+	submit(t, m, a, "pending", move(started, 1, 1, 0))
+	for len(a.events) < cap(a.events) {
+		a.events <- Event{Op: "backlog"}
+	}
+	if err := m.Leave(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.Done():
+	default:
+		t.Fatal("overflowed departed session remained open")
+	}
+	if len(r.inputSlots) != 0 {
+		t.Fatal("cancellation leaked credit")
+	}
+}

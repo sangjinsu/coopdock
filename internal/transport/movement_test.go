@@ -698,3 +698,277 @@ func TestOlderStartCannotRewindActiveMatch(t *testing.T) {
 		t.Fatal("overtaken start duplicated lifecycle")
 	}
 }
+
+func movementPeerFixture(t *testing.T) (*room.Manager, *room.Session, *peer, room.Snapshot) {
+	t.Helper()
+	cfg := room.DefaultConfig()
+	cfg.TickHz, cfg.SnapshotHz = 1, 1
+	m, err := room.NewManager(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := m.Close(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	s, err := m.Connect("review")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := m.Create(context.Background(), s, room.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &peer{session: s, ctx: context.Background(), outbound: newOutbox(16)}
+	p.setMembership(created)
+	return m, s, p, created
+}
+
+func TestMemberLeaveFencesOldSnapshot(t *testing.T) {
+	m, s, p, created := movementPeerFixture(t)
+	g, err := m.Connect("guest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.Join(context.Background(), g, room.JoinOptions{RoomNumber: created.RoomNumber}); err != nil {
+		t.Fatal(err)
+	}
+	started, err := m.Start(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.rememberStart(started)
+	// Model a valid snapshot already accepted by the processor but not selected by writer.
+	p.outbound.snapshot(protocol.Event("game.snapshot", started))
+	if err = m.Leave(context.Background(), g); err != nil {
+		t.Fatal(err)
+	}
+	var leave room.Event
+	deadline := time.After(time.Second)
+	for leave.Op == "" {
+		select {
+		case e := <-s.Events():
+			if e.Op == "room.state" && e.Snapshot.MatchID != nil && len(e.Snapshot.Members) == 1 {
+				leave = e
+			}
+		case <-deadline:
+			t.Fatal("missing leave publication")
+		}
+	}
+	if !p.processEvent(leave) {
+		t.Fatal("leave process failed")
+	}
+	sent, _, ok := p.outbound.next(context.Background())
+	if !ok || sent.Op != "room.state" {
+		t.Fatal("missing reliable leave state")
+	}
+	p.outbound.mu.Lock()
+	latest := p.outbound.latest
+	p.outbound.mu.Unlock()
+	if latest != nil {
+		old := latest.Payload.(room.Snapshot)
+		t.Fatalf("after leave capture %d with %d members, unsent snapshot capture %d with %d members remains deliverable", leave.Snapshot.SnapshotSeq, len(leave.Snapshot.Members), old.SnapshotSeq, len(old.Members))
+	}
+}
+
+type restartEndingHandler struct {
+	game.GameHandler
+	end   <-chan struct{}
+	ended bool
+}
+
+func (h *restartEndingHandler) Tick(dt float64) (game.Outcome, error) {
+	out, err := h.GameHandler.Tick(dt)
+	select {
+	case <-h.end:
+		if !h.ended {
+			h.ended = true
+			out.Events = []game.Event{{Type: "old-terminal"}}
+			out.EndReason = "old-finished"
+		}
+	default:
+	}
+	return out, err
+}
+func TestWireRestartPreservesOldTerminal(t *testing.T) {
+	end := make(chan struct{})
+	srv, m, dial := setupMovement(t, &restartEndingHandler{GameHandler: game.NewMovement(), end: end})
+	c := dial()
+	c.success("room.create", map[string]any{})
+	c.read()
+	old := assertStart(t, c)
+	selected, release := make(chan struct{}), make(chan struct{})
+	srv.mu.Lock()
+	srv.beforeProcess = func(ctx context.Context, r protocol.Request) {
+		if r.ID != nil && *r.ID == "restart" {
+			close(selected)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+	}
+	srv.mu.Unlock()
+	sendID(t, c, "room.start", "restart", map[string]any{})
+	waitDone(t, selected)
+	close(end)
+	timeout := time.Now().Add(time.Second)
+	for {
+		rooms, err := m.ListPublic(context.Background())
+		if err != nil {
+			close(release)
+			t.Fatal(err)
+		}
+		if len(rooms) == 1 && rooms[0].Phase == "WAITING" {
+			break
+		}
+		if time.Now().After(timeout) {
+			close(release)
+			t.Fatal("old match did not end")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	sendID(t, c, "room.unknown", "restart-marker", map[string]any{})
+	var ops []string
+	for {
+		f := c.read()
+		if f.ID != nil && *f.ID == "restart-marker" {
+			break
+		}
+		if f.Op == "game.snapshot" {
+			continue
+		}
+		ops = append(ops, f.Op)
+		if f.Op == "room.start" {
+			now := snapshot(t, f)
+			if now.MatchID == nil || *now.MatchID == *old.MatchID {
+				t.Fatal("restart did not create fresh match")
+			}
+		}
+	}
+	if !reflect.DeepEqual(ops, []string{"game.event", "game.ended", "room.state", "room.start", "game.started", "room.state"}) {
+		t.Fatalf("real WS new start overtook and erased queued old terminal chain: first non-snapshot frames=%v", ops)
+	}
+}
+
+// A capture selected before the leave publication must fail write-start even after reliable drains.
+func TestMemberLeaveFencesSelectedAndCoreLatest(t *testing.T) {
+	for _, mode := range []string{"selected", "core-latest", "seq-floor"} {
+		t.Run(mode, func(t *testing.T) {
+			m, s, p, created := movementPeerFixture(t)
+			g, err := m.Connect("guest")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = m.Join(context.Background(), g, room.JoinOptions{RoomNumber: created.RoomNumber}); err != nil {
+				t.Fatal(err)
+			}
+			started, err := m.Start(context.Background(), s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.rememberStart(started)
+			var epoch uint64
+			if mode == "selected" {
+				p.outbound.snapshot(protocol.Event("game.snapshot", started))
+				_, epoch, _ = p.outbound.next(context.Background())
+			}
+			if mode == "core-latest" {
+				select {
+				case <-s.SnapshotReady():
+				case <-time.After(3 * time.Second):
+					t.Fatal("missing core capture")
+				}
+			}
+			if err = m.Leave(context.Background(), g); err != nil {
+				t.Fatal(err)
+			}
+			var leave room.Event
+			for leave.Op == "" {
+				select {
+				case e := <-s.Events():
+					if e.Op == "room.state" && e.Snapshot.MatchID != nil && len(e.Snapshot.Members) == 1 {
+						leave = e
+					}
+				case <-time.After(time.Second):
+					t.Fatal("missing leave state")
+				}
+			}
+			if mode == "seq-floor" {
+				p.snapshotSeq = leave.Snapshot.SnapshotSeq + 10
+			}
+			floor := p.snapshotSeq
+			if !p.processEvent(leave) {
+				t.Fatal("leave publication failed")
+			}
+			got, _, ok := p.outbound.next(context.Background())
+			if !ok || got.Op != "room.state" {
+				t.Fatal("important state discarded")
+			}
+			if p.snapshotSeq < leave.Snapshot.SnapshotSeq || p.snapshotSeq < floor {
+				t.Error("full state lowered or failed to advance capture floor")
+			}
+			if mode == "selected" && p.outbound.beginSnapshotWrite(epoch) {
+				t.Error("selected pre-leave snapshot remains writable")
+			}
+			if mode == "core-latest" {
+				p.processSnapshot()
+				p.outbound.mu.Lock()
+				old := p.outbound.latest
+				p.outbound.mu.Unlock()
+				if old != nil {
+					capture := old.Payload.(room.Snapshot)
+					if capture.SnapshotSeq <= leave.Snapshot.SnapshotSeq || len(capture.Members) != 1 {
+						t.Error("pre-leave core latest reentered outbox after leave state")
+					}
+				}
+			}
+		})
+	}
+}
+
+// A real socket writer must recheck its selected snapshot after the guest leaves.
+func TestWireMemberLeaveFencesSelectedSnapshot(t *testing.T) {
+	srv, m, _, dial := setup(t, DefaultConfig())
+	host, hp := registeredPeer(t, srv, dial)
+	created := snapshot(t, host.success("room.create", map[string]any{}))
+	host.read()
+	guest, err := m.Connect("core-guest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.Join(context.Background(), guest, room.JoinOptions{RoomNumber: created.RoomNumber}); err != nil {
+		t.Fatal(err)
+	}
+	host.read()
+	assertStart(t, host)
+	selected, release := make(chan struct{}), make(chan struct{})
+	var once, free sync.Once
+	t.Cleanup(func() { free.Do(func() { close(release) }) })
+	srv.mu.Lock()
+	srv.beforeWrite = func(ctx context.Context, e protocol.Envelope) {
+		if e.Op == "game.snapshot" {
+			once.Do(func() {
+				close(selected)
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+			})
+		}
+	}
+	srv.mu.Unlock()
+	waitDone(t, selected)
+	if err = m.Leave(context.Background(), guest); err != nil {
+		t.Fatal(err)
+	}
+	waitReliableOp(t, hp, "room.state")
+	free.Do(func() { close(release) })
+	f := host.read()
+	var state room.Snapshot
+	if f.Op != "room.state" || json.Unmarshal(f.Payload, &state) != nil || len(state.Members) != 1 || state.GameState == nil || len(state.GameState.Players) != 1 {
+		t.Fatalf("selected old player list crossed leave fence: %+v", f)
+	}
+}
