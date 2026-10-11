@@ -1,6 +1,11 @@
 package room
 
-import "crypto/rand"
+import (
+	"context"
+	"crypto/rand"
+	"roomserver/internal/game"
+	"time"
+)
 
 type result struct {
 	snap Snapshot
@@ -10,13 +15,14 @@ type command struct {
 	s      *Session
 	g      uint64
 	list   bool
+	start  bool
+	ctx    context.Context
 	result chan result
 }
 type memberEntry struct {
 	session *Session
 	token   uint64
 }
-
 type cleanup struct {
 	s      *Session
 	roomID string
@@ -30,19 +36,45 @@ type actor struct {
 	published              bool
 	password               *credential
 	members                []memberEntry
-	revision               uint64
+	revision, snapshotSeq  uint64
 	commands               chan command
 	cleanups               chan cleanup
 	done                   chan struct{}
+	handler                game.GameHandler
+	state                  *game.State
+	matchID                string
+	serverTick             uint64
+	ticks, snapshots       <-chan time.Time
+	stopTick, stopSnapshot func()
+	inputs                 chan receipt
+	inputSlots             chan struct{}
+	pending                []receipt
+	publishingTick         bool
+	slowMembers            []memberEntry
 }
 
 func newActor(m *Manager, n string, o CreateOptions, p *credential) *actor {
-	return &actor{manager: m, id: rand.Text(), number: n, visibility: o.Visibility, capacity: o.Capacity, password: p, commands: make(chan command, m.cfg.ActorQueue), cleanups: make(chan cleanup, m.cfg.CleanupQueue), done: make(chan struct{})}
+	return &actor{manager: m, id: rand.Text(), number: n, visibility: o.Visibility, capacity: o.Capacity, password: p, commands: make(chan command, m.cfg.ActorQueue), cleanups: make(chan cleanup, m.cfg.CleanupQueue), done: make(chan struct{}), inputs: make(chan receipt, m.cfg.InputQueue), inputSlots: make(chan struct{}, m.cfg.InputQueue)}
 }
+
+// capture is actor-owned; handler state is cached outside the admission gate.
 func (r *actor) snapshot() Snapshot {
-	v := Snapshot{RoomID: r.id, RoomNumber: r.number, Visibility: r.visibility, Capacity: r.capacity, Phase: "WAITING", Members: []Member{}, Revision: r.revision, LastProcessedInputSeq: map[string]uint64{}}
+	r.snapshotSeq++
+	v := Snapshot{RoomID: r.id, RoomNumber: r.number, Visibility: r.visibility, Capacity: r.capacity, Phase: "WAITING", Members: []Member{}, Revision: r.revision, SnapshotSeq: r.snapshotSeq, LastProcessedInputSeq: map[string]uint64{}}
+	if r.matchID != "" {
+		id := r.matchID
+		v.MatchID = &id
+		v.Phase = "PLAYING"
+		v.ServerTick = r.serverTick
+		state := r.state.Clone()
+		v.GameState = &state
+	}
 	for _, entry := range r.members {
-		v.Members = append(v.Members, Member{entry.session.id})
+		s := entry.session
+		v.Members = append(v.Members, Member{s.id})
+		s.mu.Lock()
+		v.LastProcessedInputSeq[s.id] = s.lastProcessedInputSeq
+		s.mu.Unlock()
 	}
 	if len(r.members) > 0 {
 		v.HostID = r.members[0].session.id
@@ -62,36 +94,131 @@ func (r *actor) cleanup(s *Session, token uint64) {
 	}
 }
 
-// Cleanup is bound to the committed membership, not the current reservation generation.
+// Cleanup is bound to committed membership, not reservation generation.
 func (r *actor) remove(s *Session, roomID string, token uint64) bool {
 	m := r.manager
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if roomID != r.id || token == 0 || s.room != r || s.membershipToken != token {
+		s.mu.Unlock()
+		m.mu.Unlock()
 		return false
 	}
+	removed := false
 	for i, entry := range r.members {
 		if entry.session == s && entry.token == token {
 			r.members = append(r.members[:i], r.members[i+1:]...)
 			r.revision++
 			s.room = nil
 			s.membershipToken = 0
-			return true
+			s.latest = nil
+			removed = true
+			break
 		}
 	}
-	return false
+	s.mu.Unlock()
+	m.mu.Unlock()
+	if !removed {
+		return false
+	}
+	r.cancelInputs(func(in receipt) bool { return in.s == s && in.token == token })
+	if r.handler != nil {
+		out, err := r.handler.OnLeave(s.id)
+		if err != nil {
+			r.endMatch("GAME_ERROR")
+		} else {
+			state := r.handler.Snapshot().Clone()
+			r.state = &state
+			r.gameEvents(out.Events)
+			if out.EndReason != "" {
+				r.endMatch(out.EndReason)
+			}
+		}
+	}
+	return true
+}
+func (r *actor) closeSlow(entry memberEntry) {
+	if r.publishingTick {
+		// A tick publishes all completions and game events before any overflow hook can end it.
+		for _, queued := range r.slowMembers {
+			if queued == entry {
+				return
+			}
+		}
+		r.slowMembers = append(r.slowMembers, entry)
+		return
+	}
+
+	s := entry.session
+	m := r.manager
+	m.mu.Lock()
+	s.mu.Lock()
+	if !s.closed {
+		s.closed = true
+		s.generation++
+		s.joining = false
+		close(s.done)
+		delete(m.sessions, s.id)
+	}
+	s.mu.Unlock()
+	m.mu.Unlock()
+	r.remove(s, r.id, entry.token)
+}
+func (r *actor) flushSlowMembers() {
+	r.publishingTick = false
+	slow := r.slowMembers
+	r.slowMembers = nil
+	for _, entry := range slow {
+		r.closeSlow(entry)
+	}
+	if len(slow) > 0 && len(r.members) > 0 {
+		r.broadcast()
+	}
+}
+
+func (r *actor) send(s *Session, e Event) bool {
+	e.Snapshot = e.Snapshot.clone()
+	if e.Ack != nil {
+		v := *e.Ack
+		e.Ack = &v
+	}
+	if e.Ended != nil {
+		v := *e.Ended
+		e.Ended = &v
+	}
+	if e.GameEvent != nil {
+		v := *e.GameEvent
+		e.GameEvent = &v
+	}
+	select {
+	case s.events <- e:
+		return true
+	default:
+		return false
+	}
+}
+func (r *actor) broadcastEvent(e Event) {
+	var slow []memberEntry
+	for _, entry := range r.members {
+		e.MembershipToken = entry.token
+		if !r.send(entry.session, e) {
+			slow = append(slow, entry)
+		}
+	}
+	for _, entry := range slow {
+		r.closeSlow(entry)
+	}
+	if len(slow) > 0 && len(r.members) > 0 && !r.publishingTick {
+		r.broadcast()
+	}
 }
 func (r *actor) broadcast() {
+	// Overflow cleanup runs directly on this actor; it must not wait on its own queue.
 	for {
 		v := r.snapshot()
 		var slow []memberEntry
 		for _, entry := range r.members {
-			s := entry.session
-			select {
-			case s.events <- v.clone():
-			default:
+			if !r.send(entry.session, Event{Op: "room.state", Snapshot: v, MembershipToken: entry.token}) {
 				slow = append(slow, entry)
 			}
 		}
@@ -99,93 +226,119 @@ func (r *actor) broadcast() {
 			return
 		}
 		for _, entry := range slow {
-			s := entry.session
-			m := r.manager
-			m.mu.Lock()
-			s.mu.Lock()
-			if !s.closed {
-				s.closed = true
-				s.generation++
-				s.joining = false
-				close(s.done)
-				delete(m.sessions, s.id)
-			}
-			s.mu.Unlock()
-			m.mu.Unlock()
-			r.remove(s, r.id, entry.token)
+			r.closeSlow(entry)
+		}
+		if len(r.members) == 0 {
+			return
 		}
 	}
 }
 func (r *actor) admit(c command) result {
 	m := r.manager
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	s := c.s
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if m.closing {
-		return result{err: failure("SERVER_CLOSING")}
+	var err error
+	switch {
+	case m.closing:
+		err = failure("SERVER_CLOSING")
+	case m.rooms[r.number] != r:
+		err = failure("ROOM_CLOSED")
+	case s.closed || s.manager != m || m.sessions[s.id] != s:
+		err = failure("SESSION_CLOSED")
+	case s.generation != c.g || !s.joining || s.room != nil:
+		err = failure("ALREADY_IN_ROOM")
+	case r.matchID != "":
+		err = failure("ROOM_IN_PROGRESS")
+	case len(r.members) >= r.capacity:
+		err = failure("ROOM_FULL")
 	}
-	if m.rooms[r.number] != r {
-		return result{err: failure("ROOM_CLOSED")}
+	if err == nil {
+		r.published = true
+		r.members = append(r.members, memberEntry{session: s, token: c.g})
+		s.room = r
+		s.membershipToken = c.g
+		s.joining = false
+		r.revision++
 	}
-	if s.closed || s.manager != m || m.sessions[s.id] != s {
-		return result{err: failure("SESSION_CLOSED")}
+	s.mu.Unlock()
+	m.mu.Unlock()
+	if err != nil {
+		return result{err: err}
 	}
-	if s.generation != c.g || !s.joining || s.room != nil {
-		return result{err: failure("ALREADY_IN_ROOM")}
-	}
-	if len(r.members) >= r.capacity {
-		return result{err: failure("ROOM_FULL")}
-	}
-	r.published = true
-	r.members = append(r.members, memberEntry{session: s, token: c.g})
-	s.room = r
-	s.membershipToken = c.g
-	s.joining = false
-	r.revision++
 	return result{snap: r.snapshot()}
+}
+func (r *actor) handleCleanup(c cleanup) {
+	if r.remove(c.s, c.roomID, c.token) {
+		if len(r.members) > 0 {
+			r.broadcast()
+		}
+	}
+	close(c.done)
+}
+func (r *actor) handleCommand(c command) {
+	if c.list {
+		c.result <- result{snap: r.snapshot()}
+		return
+	}
+	if c.start {
+		r.start(c)
+		return
+	}
+	x := r.admit(c)
+	if x.err == nil && r.manager.cfg.afterCommit != nil {
+		r.manager.cfg.afterCommit()
+	}
+	c.result <- x
+	if x.err == nil {
+		r.broadcast()
+	}
 }
 func (r *actor) run() {
 	defer r.manager.wg.Done()
-	defer close(r.done)
+	defer func() {
+		// Registry removal and input admission share the gate, preventing orphan enqueue.
+		m := r.manager
+		m.mu.Lock()
+		if m.rooms[r.number] == r {
+			delete(m.rooms, r.number)
+		}
+		m.mu.Unlock()
+		r.stopTickers()
+		r.cancelInputs(func(receipt) bool { return true })
+		for len(r.members) > 0 {
+			entry := r.members[0]
+			r.remove(entry.session, r.id, entry.token)
+		}
+		close(r.done)
+	}()
 	for {
-		var c cleanup
+		// Cleanup and already-ready simulation ticks precede ordinary commands.
 		select {
-		case c = <-r.cleanups:
-			if r.remove(c.s, c.roomID, c.token) {
-				r.broadcast()
-			}
-			close(c.done)
+		case c := <-r.cleanups:
+			r.handleCleanup(c)
 		default:
 			select {
-			case c = <-r.cleanups:
-				if r.remove(c.s, c.roomID, c.token) {
-					r.broadcast()
-				}
-				close(c.done)
-			case v := <-r.commands:
-				if v.list {
-					v.result <- result{snap: r.snapshot()}
-				} else {
-					x := r.admit(v)
-					if x.err == nil && r.manager.cfg.afterCommit != nil {
-						r.manager.cfg.afterCommit()
-					}
-					v.result <- x
-					if x.err == nil {
-						r.broadcast()
-					}
+			case <-r.ticks:
+				r.tick()
+			default:
+				select {
+				case c := <-r.cleanups:
+					r.handleCleanup(c)
+				case <-r.ticks:
+					r.tick()
+				case <-r.snapshots:
+					r.publishSnapshot()
+				case in := <-r.inputs:
+					r.pending = append(r.pending, in)
+				case c := <-r.commands:
+					r.handleCommand(c)
+				case <-r.manager.stop:
+					return
 				}
 			}
 		}
 		if len(r.members) == 0 {
-			m := r.manager
-			m.mu.Lock()
-			if m.rooms[r.number] == r {
-				delete(m.rooms, r.number)
-			}
-			m.mu.Unlock()
 			return
 		}
 	}

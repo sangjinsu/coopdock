@@ -635,7 +635,8 @@ func TestPipelinedAdmissionLeaveRejoinInitialEvent(t *testing.T) {
 			// cannot accidentally pass because select consumed the core FIFO first.
 			var firstState room.Snapshot
 			select {
-			case firstState = <-p.session.Events():
+			case firstEvent := <-p.session.Events():
+				firstState = firstEvent.Snapshot
 			case <-time.After(3 * time.Second):
 				t.Fatal("initial core event missing")
 			}

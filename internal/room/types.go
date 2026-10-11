@@ -1,6 +1,9 @@
 package room
 
-import "time"
+import (
+	"roomserver/internal/game"
+	"time"
+)
 
 type CreateOptions struct {
 	Capacity   int
@@ -24,13 +27,17 @@ type Snapshot struct {
 	HostID                string            `json:"host_id"`
 	Members               []Member          `json:"members"`
 	Revision              uint64            `json:"revision"`
-	GameState             any               `json:"game_state"`
+	GameState             *game.State       `json:"game_state"`
 	ServerTick            uint64            `json:"server_tick"`
 	SnapshotSeq           uint64            `json:"snapshot_seq"`
 	LastProcessedInputSeq map[string]uint64 `json:"last_processed_input_seq"`
 }
 
 func (v Snapshot) clone() Snapshot {
+	if v.GameState != nil {
+		state := v.GameState.Clone()
+		v.GameState = &state
+	}
 	v.Members = append([]Member{}, v.Members...)
 	inputs := make(map[string]uint64, len(v.LastProcessedInputSeq))
 	for k, n := range v.LastProcessedInputSeq {
@@ -45,6 +52,9 @@ func (v Snapshot) clone() Snapshot {
 }
 
 type Config struct {
+	TickHz, SnapshotHz, InputQueue, InputsPerTick                         int
+	HandlerFactory                                                        func() game.GameHandler
+	newTicker                                                             func(time.Duration) (<-chan time.Time, func())
 	MaxRooms, MaxSessions, NumberRetries                                  int
 	ActorQueue, CleanupQueue, EventQueue, ListLimit                       int
 	HashWorkers, HashQueue                                                int
@@ -64,5 +74,40 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	return Config{MaxRooms: 128, MaxSessions: 768, NumberRetries: 64, ActorQueue: 64, CleanupQueue: 6, EventQueue: 64, ListLimit: 100, HashWorkers: 2, HashQueue: 8, FailureTTL: time.Minute, IPFailureLimit: 20, SessionFailureLimit: 5, RoomFailureLimit: 30, MaxFailureKeys: 4096, RequestTimeout: 5 * time.Second, ShutdownTimeout: 10 * time.Second, ArgonMemory: 19456, ArgonTime: 2, ArgonThreads: 1, SaltBytes: 16, HashBytes: 32}
+	return Config{TickHz: 30, SnapshotHz: 15, InputQueue: 256, InputsPerTick: 64, HandlerFactory: game.NewMovement, MaxRooms: 128, MaxSessions: 768, NumberRetries: 64, ActorQueue: 64, CleanupQueue: 6, EventQueue: 64, ListLimit: 100, HashWorkers: 2, HashQueue: 8, FailureTTL: time.Minute, IPFailureLimit: 20, SessionFailureLimit: 5, RoomFailureLimit: 30, MaxFailureKeys: 4096, RequestTimeout: 5 * time.Second, ShutdownTimeout: 10 * time.Second, ArgonMemory: 19456, ArgonTime: 2, ArgonThreads: 1, SaltBytes: 16, HashBytes: 32}
+}
+
+const MaxInputSeq uint64 = 9007199254740991
+
+type Input struct {
+	MatchID  string
+	InputSeq uint64
+	Action   game.Action
+}
+type ActionAck struct {
+	MatchID    string `json:"match_id"`
+	InputSeq   uint64 `json:"input_seq"`
+	ServerTick uint64 `json:"server_tick"`
+}
+type Ended struct {
+	MatchID    string `json:"match_id"`
+	Reason     string `json:"reason"`
+	ServerTick uint64 `json:"server_tick"`
+}
+type GameEvent struct {
+	EventID    string `json:"event_id"`
+	MatchID    string `json:"match_id"`
+	ServerTick uint64 `json:"server_tick"`
+	Type       string `json:"type"`
+	SessionID  string `json:"session_id"`
+}
+type Event struct {
+	Op              string
+	Snapshot        Snapshot
+	MembershipToken uint64
+	RequestID       string
+	Ack             *ActionAck
+	Err             error
+	Ended           *Ended
+	GameEvent       *GameEvent
 }

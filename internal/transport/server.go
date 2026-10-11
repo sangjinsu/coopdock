@@ -263,7 +263,11 @@ func (p *peer) processor() {
 			return
 		case <-p.session.Done():
 			return
-		case state := <-p.session.Events():
+		case event := <-p.session.Events():
+			if event.Op != "room.state" {
+				continue
+			}
+			state := event.Snapshot
 			// Ignore stale membership events and the initial snapshot already sent.
 			if state.RoomID == p.roomID && state.Revision > p.minRevision {
 				if !p.enqueue(protocol.Event("room.state", state)) {

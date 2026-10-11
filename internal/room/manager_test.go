@@ -256,10 +256,10 @@ func TestSnapshotsContainNoSecrets(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if v.Members[0].SessionID != h.ID() || len(v.LastProcessedInputSeq) != 0 {
+	if v.Members[0].SessionID != h.ID() || len(v.LastProcessedInputSeq) != 2 || v.LastProcessedInputSeq[h.ID()] != 0 || v.LastProcessedInputSeq[s.ID()] != 0 || v.LastProcessedInputSeq["x"] != 0 {
 		t.Fatal(v)
 	}
-	for _, snap := range []Snapshot{v, <-h.Events()} {
+	for _, snap := range []Snapshot{v, (<-h.Events()).Snapshot} {
 		raw, _ := json.Marshal(snap)
 		for _, bad := range []string{secret, "password", "hash", "salt", "mutated"} {
 			if strings.Contains(string(raw), bad) {
