@@ -8,3 +8,4 @@ work/
 /go-build/
 /go-mod/
 /tmp/
+examples/godot/.godot/
