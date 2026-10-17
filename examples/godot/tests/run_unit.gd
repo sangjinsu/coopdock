@@ -11,6 +11,9 @@ func check(condition: bool, message: String) -> void:
 		printerr("FAIL: ", message)
 
 func _initialize() -> void:
+	_run.call_deferred()
+
+func _run() -> void:
 	test_wire_payloads()
 	test_decode_envelope_and_numbers()
 	test_message_role_and_identity()
@@ -20,6 +23,8 @@ func _initialize() -> void:
 	test_requests_and_timeouts()
 	test_lifecycle_deadlines_and_list_isolation()
 	test_heartbeat_and_limits()
+	await test_lobby_behaviors()
+	await test_lobby_pre_ready_rooms()
 	print("unit checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
 
@@ -215,3 +220,128 @@ func test_message_role_and_identity() -> void:
 	malformed = Support.snapshot()
 	malformed.members.append({"session_id": "sA"})
 	check(not WireCodec.decode_server(Support.event("room.state", malformed)).ok, "duplicate member rejected")
+
+func test_lobby_behaviors() -> void:
+	var lobby_script: Variant = load("res://scripts/lobby.gd")
+	check(lobby_script != null, "native lobby implementation exists")
+	if lobby_script == null:
+		return
+	var client: Support.FakeClient = Support.ready_client()
+	client.status = "guest"
+	var lobby: Variant = lobby_script.new()
+	# Bind before ready and bind again: neither duplicates signal-driven actions.
+	lobby.bind_client(client)
+	root.add_child(lobby)
+	await process_frame
+	lobby.bind_client(client)
+	check(lobby._connection_label.size.x > lobby._connection_label.size.y, "connection status remains a horizontal Korean label")
+	check(lobby.capacity_select.item_count == 6, "capacity covers 1 through 6")
+	for index: int in 6:
+		check(lobby.capacity_select.get_item_id(index) == index + 1, "capacity sends literal size")
+	check(not lobby.create_button.disabled and not lobby.join_button.disabled and lobby.start_button.disabled, "guest can enter but cannot start")
+	for bad: String in ["12345", "1234567", "１２３４５６"]:
+		lobby.room_number_edit.text = bad
+		lobby._join_clicked()
+	check(client.sent.is_empty(), "invalid native room numbers never sent")
+	lobby.room_number_edit.text = "004271"
+	lobby.join_button.pressed.emit()
+	check(client.sent.size() == 1, "repeated bind sends one join on click")
+	lobby.bind_client(client)
+	check(lobby.join_button.disabled, "rebinding same client preserves pending admission gate")
+	var request: Dictionary = JSON.parse_string(client.sent.back())
+	check(request.payload == {"room_number": "004271"}, "first join preserves zeros and omits password")
+	client._accept_text(Support.event("room.join", null, request.request_id, {"code": "PASSWORD_REQUIRED", "message": "Room password is required."}), 1, 1)
+	check(lobby.join_password_edit.visible and lobby.join_password_edit.secret, "server challenge reveals masked join field")
+	check(lobby.status_label.text.contains("Room password is required.") and lobby.status_label.text.contains("비밀번호"), "challenge preserves original error and Korean guidance")
+	lobby.join_password_edit.text = " abcd "
+	lobby.join_button.pressed.emit()
+	request = JSON.parse_string(client.sent.back())
+	check(request.payload.get("password", "") == " abcd ", "join sends exact password spaces")
+	client._accept_text(Support.event("room.join", null, request.request_id, {"code": "PASSWORD_INVALID", "message": "Room password is invalid."}), 1, 2)
+	check(client.sent.size() == 2 and lobby.status_label.text.contains("Room password is invalid."), "wrong password shows error without auto retry")
+	lobby.create_password_edit.text = "secret"
+	lobby._handle_snapshot(Support.snapshot())
+	check(lobby.join_password_edit.text.is_empty() and lobby.create_password_edit.text.is_empty(), "successful admission clears both secrets")
+	check(not lobby.start_button.disabled and lobby.create_button.disabled and lobby.join_button.disabled and not lobby.leave_button.disabled, "waiting host gates admission and enables start/leave")
+	lobby._handle_snapshot(Support.snapshot("rA", null, 2, 2, ["sB", "sA"]))
+	check(lobby.start_button.disabled, "waiting member cannot start")
+	lobby._handle_snapshot(Support.snapshot("rA", "mA", 3, 3))
+	check(lobby.start_button.disabled and not lobby.leave_button.disabled, "playing gates start but permits leave")
+	client.state.session_id = "same-prefix-self"
+	lobby._handle_snapshot(Support.snapshot("rA", null, 4, 4, ["same-prefix-host", "same-prefix-self"]))
+	check(lobby.start_button.disabled, "full IDs distinguish host from self")
+	check(lobby.members_label.text.count("(나)") == 1 and lobby.members_label.text.count("(방장)") == 1, "only matching full identity gets self or host marker")
+	lobby.join_password_edit.text = "secret"
+	lobby._handle_connection("disconnected")
+	check(lobby.join_password_edit.text.is_empty() and not lobby.join_password_edit.visible, "disconnect clears secret and challenge")
+	for status: String in ["connecting", "closing", "disconnected"]:
+		lobby._handle_connection(status)
+		check(lobby.create_button.disabled and lobby.join_button.disabled and lobby.refresh_button.disabled and lobby.start_button.disabled, "unready state disables room actions")
+	lobby.queue_free()
+	client.free()
+	await process_frame
+	client = Support.ready_client()
+	client.status = "guest"
+	lobby = lobby_script.new()
+	root.add_child(lobby)
+	await process_frame
+	lobby.bind_client(client)
+	lobby.visibility_select.select(1)
+	lobby.visibility_select.item_selected.emit(1)
+	check(lobby.create_password_edit.visible and lobby.create_password_edit.secret, "private create shows secret field")
+	lobby.capacity_select.select(0)
+	lobby.create_password_edit.text = " 가나ab "
+	lobby.create_button.pressed.emit()
+	request = JSON.parse_string(client.sent.back())
+	check(request.payload.get("capacity") == 1 and request.payload.get("visibility") == "private" and request.payload.get("password") == " 가나ab ", "private create keeps exact Unicode password and capacity")
+	client._accept_text(Support.event("room.create", null, request.request_id, {"code": "SERVER_BUSY", "message": "busy"}), 1, 1)
+	lobby.visibility_select.select(0)
+	lobby.visibility_select.item_selected.emit(0)
+	check(lobby.create_password_edit.text.is_empty() and not lobby.create_password_edit.visible, "public switch clears hidden private secret")
+	lobby.create_button.pressed.emit()
+	request = JSON.parse_string(client.sent.back())
+	check(request.payload.get("capacity") == 1 and request.payload.get("visibility") == "public" and not request.payload.has("password"), "public create omits password")
+	client._accept_text(Support.event("room.create", {"snapshot": Support.snapshot()}, request.request_id), 1, 2)
+	check(lobby.room_label.text.contains("004271"), "successful create displays leading-zero room number")
+	lobby.create_password_edit.text = "secret"
+	lobby.leave_button.pressed.emit()
+	check(lobby.create_password_edit.text.is_empty() and lobby.start_button.disabled, "leave clears secret and membership controls")
+	lobby.queue_free()
+	client.free()
+	await process_frame
+
+func test_lobby_pre_ready_rooms() -> void:
+	var client: Support.FakeClient = Support.ready_client()
+	client.status = "guest"
+	var lobby := LobbyPanel.new()
+	lobby.bind_client(client)
+	# Events can arrive after binding but before widgets exist.
+	client.rooms_received.emit([])
+	client.rooms_received.emit([Support.snapshot()])
+	root.add_child(lobby)
+	await process_frame
+	check(client.sent.size() == 1, "pre-ready room events recover with one fresh list request")
+	if client.sent.size() == 1:
+		var request: Dictionary = JSON.parse_string(client.sent[0])
+		check(request.op == "room.list" and request.payload == {}, "recovery list request uses valid empty payload")
+		client._accept_text(Support.event("room.list", {"rooms": [Support.snapshot()]}, request.request_id), 1, 1)
+	check(lobby.rooms_list.item_count == 1, "fresh rooms render after pre-ready event")
+	if lobby.rooms_list.item_count == 1:
+		lobby.rooms_list.item_selected.emit(0)
+		check(lobby.room_number_edit.text == "004271", "recovered list selection preserves leading zeros")
+	lobby.bind_client(client)
+	check(client.sent.size() == 1, "rebind does not repeat deferred list refresh")
+	lobby.queue_free()
+	client.free()
+	await process_frame
+	client = Support.ready_client()
+	client.status = "guest"
+	lobby = LobbyPanel.new()
+	root.add_child(lobby)
+	await process_frame
+	lobby.bind_client(client)
+	client.rooms_received.emit([Support.snapshot()])
+	check(lobby.rooms_list.item_count == 1, "ready-before-bind list event renders normally")
+	lobby.queue_free()
+	client.free()
+	await process_frame
