@@ -6,7 +6,7 @@
 현재 구현 범위·실행 방법·검증은 [서버 가이드](server-guide.md)를 참조한다.
 reference 3D 이동 GameHandler와 서버 동기화의 현재 구현·검증은 서버 가이드를 참조한다. 현재 Basic viewer 조회 대시보드(status/rooms·embed 화면)를 구현했다. 게임별 지형·충돌·협동 규칙, Godot 클라이언트, 운영 상세·조작·audit와 운영 부하·성능 측정은 후속 범위다.
 
-아래는 **후속 조작을 포함한 목표 그림**이다. 현재 게임/조회 경로는 [README 구조도](../README.md#서버의-두-경로), 현재 JSON·인증·주기는 [운영 가이드](server-guide.md#운영-대시보드-켜기)를 따른다.
+아래는 **후속 조작을 포함한 목표 그림**이다. 현재 게임/조회 경로는 [현재 서버 구조](architecture.md#게임-처리와-운영-조회), 현재 JSON·인증·주기는 [운영 가이드](server-guide.md#운영-대시보드-켜기)를 따른다.
 
 ```mermaid
 flowchart TB
