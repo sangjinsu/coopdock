@@ -9,14 +9,15 @@
 | 화면 | 현재 구현 |
 |---|---|
 | 서버 개요 | RUNNING/STOPPING, readiness, instance ID, live 연결 수, 룸 membership 합계, 전체/대기/게임 중 룸 수 |
-| 룸 목록 | 전체 내부 room ID·6자리 번호·visibility·phase·인원/정원·host ID·nullable match ID |
-| 검색과 페이지 | 번호 앞자리 ASCII 0~6자리, WAITING/PLAYING, public/private, 100개 페이지와 이전/다음 |
+| 룸 목록 | 게임 ID·전체 내부 room ID·6자리 번호·visibility·phase·인원/정원·host ID·nullable match ID |
+| 검색과 페이지 | 게임 ID exact match·번호 앞자리 ASCII 0~6자리, WAITING/PLAYING, public/private, 100개 페이지와 이전/다음 |
 | runtime | uptime 초, HeapAlloc MiB, goroutine 수; CPU·RTT·클라이언트 표시지연은 미측정 |
 | 신선도 | cache와 actor row의 갱신 시각·age·stale, API별 마지막 성공 자료와 오류 |
 
 RUNNING은 프로세스 실행 상태, readiness는 신규 수용 gate, freshness는 자료의 게시 시각이다. readiness가 true여도 정원이 남거나 낮은 지연이 보장되는 것은 아니다. live 연결에는 룸 밖 guest도 포함하며 membership은 룸에 실제 속한 인원이다. heap은 OS RSS가 아니며 goroutine은 플레이어 수가 아니다. 계측하지 않은 CPU·RTT·화면 지연은 API `null`, 화면 `미측정`이다.
 
-전체 ID와 번호를 잘라내지 않으며 번호는 문자열로 앞 0을 유지한다. private도 운영 목록에 표시하지만 게임 `room.list`는 public-only다. password·hash·salt·운영 token·전체 member ID 목록·game_state는 운영 summary/cache/API/HTML/로그에 넣지 않는다.
+전체 ID와 번호를 잘라내지 않으며 번호는 문자열로 앞 0을 유지한다. private도 운영 목록에 표시하지만 게임 `room.list`는 연결된 게임의 public-only다. 같은 번호라도 게임이 다르면 별개 룸이다.
+admin은 인증된 전체 운영 조회이며 tenant별 권한은 제공하지 않는다. 전체 cache에 필터를 먼저 적용한 뒤 `(game_id, room_number, room_id)` 순으로 정렬하고 pagination한다. `game_id` 생략은 전체, 정확한 ID는 해당 게임, 문법이 맞는 미등록 ID는 빈 결과다. `total`과 status counter는 전체 게임 합계이며 `matched_total`은 필터 결과 수다. password·hash·salt·운영 token·전체 member ID 목록·game_state는 운영 summary/cache/API/HTML/로그에 넣지 않는다.
 
 ## 갱신과 조회 경계
 
@@ -40,4 +41,4 @@ polling은 두 API batch 완료 후 5초, batch timeout은 5초다. 한 batch만
 
 룸·연결 상세, 참가자 전체 목록, tick 완료율·밀림·큐·송신 지표, kick/close/drain, command 결과와 지속 audit, operator 계정·JWT/session/OIDC는 후속이다. 목표 설계는 [06. 운영 조작과 종료](06-operations-and-shutdown.md)에 있다. tick 설정값을 실제 처리율로, RTT를 클라이언트 표시지연으로 대신하지 않는다. 서버와 클라이언트의 시계를 단순히 빼 도착 지연으로 사용하지 않는다.
 
-현재 검증은 deterministic actor blocking→stale→recovery·cache-only HTTP 계약, 보호된 실제 UI와 6 WS 서버 동작, 별도 mock/VM UI 행위로 구분한다. 실제 운영 부하·CPU·latency 영향·Godot 화면, native Basic prompt 입력 UX·OS background throttle·browser 메뉴 200% zoom·실제 BFCache 적격성은 별도 근거가 없으면 미검증이다. 검증 기준은 [08](08-validation.md)에 있다.
+현재 검증은 deterministic actor blocking→stale→recovery·cache-only HTTP 계약, 보호된 실제 UI와 6 WS 서버 동작, 별도 mock/VM UI 행위로 구분한다. 이 운영 검증 자체는 Godot 화면 증거가 아니며, 별도 [Godot 예제 검증](../../examples/godot/README.md#검증-명령과-확인한-범위)을 참조한다. 실제 운영 부하·CPU·latency 영향, native Basic prompt 입력 UX·OS background throttle·browser 메뉴 200% zoom·실제 BFCache 적격성은 별도 근거가 없으면 미검증이다. 검증 기준은 [08](08-validation.md)에 있다.

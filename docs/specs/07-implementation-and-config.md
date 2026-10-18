@@ -12,16 +12,16 @@
 
 | 구분 | 내용 |
 |---|---|
-| 확정 요구 | Go 우선, 룸당 1~6명, 실시간 이동·협동, 향후 Godot 연결, 운영 대시보드 |
+| 확정 요구 | Go 우선, 룸당 1~6명, 실시간 이동·협동, Godot 연결, 운영 대시보드 |
 | 확정 요구 | 번호 직접 입장, private는 생성자가 지정한 비밀번호 확인 |
 | 초기 제안 | 단일 프로세스와 메모리 저장, `net/http` + `coder/websocket`, guest 세션 |
-| 후속 범위 | Godot 게임 화면·보간·예측, operator 계정·로그인 제품 선택, 규모에 따른 확장 |
+| 후속 범위 | 게임별 규칙·local prediction, operator 계정·로그인 제품 선택, 규모에 따른 확장 |
 
 단일 프로세스는 하나의 서버 실행 프로그램에서 룸과 운영 기능을 함께 처리한다는 뜻이다.
 메모리 저장 제안에서는 서버 재시작 시 세션·룸·게임 상태가 사라진다. 감사 기록(audit)의 별도 지속 보관은 후속 설계다.
-전용 SDK(클라이언트 연동 개발 도구 묶음)는 필수가 아니다. Godot는 `WebSocketPeer`와 공개 JSON 계약으로 나중에 연결한다.
+전용 SDK(클라이언트 연동 개발 도구 묶음)는 필수가 아니다. Godot [desktop 예제](../../examples/godot/README.md)는 `WebSocketPeer`와 공개 JSON 계약으로 연결한다.
 guest는 로그인 계정 없이 새 연결에 부여하는 임시 세션이다.
-Go reference 3D 이동과 실시간 서버 동기화는 구현했으며 실행·검증은 [서버 가이드](../server-guide.md)를 참조한다. 게임별 지형·충돌·협동 목표·승패와 Godot 클라이언트까지 완성하는 것은 별개의 작업이다.
+Go reference 3D 이동과 실시간 서버 동기화는 구현했으며 실행·검증은 [서버 가이드](../server-guide.md)를 참조한다. Godot 예제는 3D와 XZ 2D(32px/unit), snapshot 보간을 제공한다. 게임별 지형·충돌·협동 목표·승패는 후속 작업이다.
 
 ## 목표 폴더 구조와 현재 조회 모듈
 
@@ -57,7 +57,7 @@ actor는 변경 가능한 룸 상태를 전담하는 실행 작업이고 GameHan
 |---|---|
 | transport / protocol | 통신 연결, 메시지 형식·크기 검사 |
 | session | 연결별 읽기·쓰기, 룸 입장 예약, 송신 관리 |
-| room | 내부 ID·번호 registry와 룸별 actor; actor만 멤버·게임 상태 변경 |
+| room | 내부 ID·게임별 번호 registry와 룸별 actor; actor만 멤버·게임 상태 변경 |
 | room/password.go | actor 밖의 bounded worker에서 Argon2id 생성·검증, 비밀정보를 공개 상태와 분리 |
 | game | GameHandler로 이동·충돌·협동·게임 종료 규칙 계산 |
 | admin | 현재 Basic viewer 인증과 cache-only 조회·embed 화면. 명령 접수·결과 조회는 후속 |
@@ -81,6 +81,7 @@ Hz는 초당 횟수다. TTL은 기록 보관 시간, stale은 오래된 요약 �
 
 | 설정 | 현재 기준 | 판단 기준 |
 |---|---|---|
+| 게임 등록 | GAME_IDS 기본 default, 1~32개 ID allowlist | 연결 때 game_id 고정, 공개 namespace이며 인증이 아님; 자원 한도·공통 handler 공유 |
 | 룸 정원 | 허용 1~6명, 기본 6명 제안 | 범위 검사; 생성자가 지정한 정원 적용 |
 | 번호 / 공개 여부 | 숫자 6자리 문자열 / 기본 public 제안 | 선행 0·활성 중복 방지·충돌 재시도 상한 |
 | private 비밀번호 | 4~64 Unicode 문자(code point) 제안 | 대소문자 구분, 임의 trim·정규화 없음; 원문 저장·응답 없음 |
@@ -117,7 +118,7 @@ CPU 사용량이나 동시 룸 수의 실측 결과는 없다. 임의의 수용 
 
 연결만 중계하는 서버로는 이동·충돌·승패가 구현되지 않는다.
 전체 설계에는 운영 조작까지 포함하되, 화면 조회를 먼저 만들고 조작과 audit를 함께 추가한다.
-Godot의 표시·보간·예측은 클라이언트 후속 작업이다. 서버 시험 결과로 화면의 부드러움까지 확정하지 않는다.
+Godot 예제의 표시·보간은 별도 client unit·실제 wire·native 렌더로 확인한다. local prediction은 후속이며 서버 시험 결과로 화면의 부드러움까지 확정하지 않는다.
 
 ## 구현 후 확인할 것
 

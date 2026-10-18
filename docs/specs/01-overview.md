@@ -13,8 +13,8 @@
 | 확정 요구사항 | Godot 활용, 운영 대시보드와 조회·제어 API 포함 |
 | 초기 설계 제안 | 단일 프로세스·메모리 기반 룸, `net/http` + `coder/websocket` |
 | 초기 연결 제안 | Godot `WebSocketPeer`에서 custom JSON 사용. 전용 SDK는 필수가 아님 |
-| 실제 구현 상태 | reference 이동과 Basic viewer 조회 대시보드(서버·룸 목록) 구현. 현재 범위·실행 방법·검증은 [서버 가이드](../server-guide.md) 참조 |
-| 후속 개발·미검증 | 게임별 지형·충돌·협동 규칙 확장·Godot 클라이언트·운영 상세/조작/audit·운영 부하와 성능 측정 |
+| 실제 구현 상태 | 게임별 룸 namespace, reference 이동, Basic viewer 조회 대시보드(서버·룸 목록), Godot desktop 3D/2D 예제 구현. 현재 범위·실행 방법·검증은 [서버 가이드](../server-guide.md) 참조 |
+| 후속 개발·미검증 | 게임별 지형·충돌·협동 규칙 확장·local prediction·운영 상세/조작/audit·web export/TLS·운영 부하와 성능 측정 |
 
 여기서 프로세스는 실행 중인 서버 프로그램 하나를 뜻하며, 초기에는 하나로 시작하도록 제안합니다.
 메모리 기반은 실행 중에 상태를 보관한다는 뜻이며, **재시작 때 세션·룸·게임 상태가 사라집니다.**
@@ -32,11 +32,11 @@
 
 ## 목표 전체 구성 그림
 
-POST·AdminCommandService·DrainCoordinator는 후속 설계다. 현재 게임/조회 경로는 [README 구조도](../../README.md#서버의-두-경로)와 [05](05-operations-dashboard.md)를 따른다.
+POST·AdminCommandService·DrainCoordinator는 후속 설계다. 현재 게임/조회 경로는 [현재 서버 구조](../architecture.md)와 [05](05-operations-dashboard.md)를 따른다.
 
 ```mermaid
 flowchart LR
-    C["게임 참가자<br/>추후 Godot"] -->|조작 의도 / JSON| W["WebSocket 연결"]
+    C["게임 참가자<br/>Godot 3D/2D 예제"] -->|조작 의도 / JSON| W["WebSocket 연결"]
     W --> S["세션<br/>연결의 신분"]
     S --> R["룸 담당자<br/>상태 변경 순서 관리"]
     R --> G["GameHandler<br/>게임 규칙 계산"]
@@ -54,7 +54,7 @@ flowchart LR
 | 구성 | 쉬운 책임 |
 |---|---|
 | Session | 연결을 읽고, 현재 룸을 기억하고, 보낼 메시지를 관리 |
-| RoomManager | 현재 룸과 입력 번호의 매핑 관리 |
+| RoomManager | 연결 게임의 룸과 `(game_id, room_number)` 매핑 관리 |
 | PasswordService | 게임 계산 담당자 밖에서 제한된 동시 작업으로 비밀번호 저장값 생성·검증 |
 | Room actor | 참가자·방장·게임 상태를 변경하는 유일한 담당자 |
 | GameHandler | 게임에 맞는 이동·충돌·협동·종료 규칙 |
@@ -84,9 +84,11 @@ Godot의 `@rpc`나 자동 동기화 기능은 custom Go 서버와 자동으로 �
 - 룸 수명 동안 공개 여부·비밀번호를 고정하며 host가 바뀌어도 유지합니다. 비밀번호 변경 기능은 추가하지 않습니다.
 - 자동 재접속 복원은 포함하지 않습니다. 새 guest 연결은 이전 `PLAYING` 룸에 다시 들어갈 수 없습니다.
 - 여러 서버에 룸을 분산하거나 DB에 게임 진행 상태를 보관하는 기능은 초기 범위 밖입니다.
-- 게임별 규칙, Godot 화면의 부드러운 표시·예측, 운영 계정 관리·operator 로그인은 후속 구현 대상입니다. 현재는 운영 전용 Basic viewer token을 사용합니다.
+- 게임별 규칙, local prediction, 운영 계정 관리·operator 로그인은 후속 구현 대상입니다. Godot 예제는 수신 간격 기반 보간으로 서버 위치를 표시하며 추가 표시 지연이 있습니다. 현재는 운영 전용 Basic viewer token을 사용합니다.
 - 계산 기본 30Hz·상태 전송 기본 15Hz는 실제 처리율 보장이 아닙니다. 운영 조회는 batch 완료 후 5초, summary/collector/runtime 각각 1초, stale 고정 5초입니다.
 - 실제 장비와 게임 계산량을 측정하기 전에는 전체 수용 인원이나 지연 없는 플레이를 보장하지 않습니다.
+
+게임은 `GAME_IDS`로 등록하고 연결 때 선택합니다. 연결의 게임은 바뀌지 않으며 public namespace는 인증이 아닙니다. 전역 자원 한도와 공통 이동 handler를 공유합니다. [Godot 예제 실행과 검증 범위](../../examples/godot/README.md)를 참조하세요.
 
 ## 프로젝트 이름 후보
 

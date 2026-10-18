@@ -1,10 +1,10 @@
 # Godot reference client 설계
 
-이 설계는 `59dccc33c5f4bb3f939efb77b588301b74ab5b6b`의 Go 서버에 연결하는 desktop Godot 예제다. 사용자가 승인한 Go 서버·Godot·3D 방향과 이번 실행 요청을 구체화한다. 소스 조사 기록 `work/godot-client/protocol-contract.md`가 wire의 권위 자료이며, 이 문서는 새로운 서버 기능이나 성능 보장을 정의하지 않는다.
+이 설계는 `59dccc33c5f4bb3f939efb77b588301b74ab5b6b`의 Go 서버에 연결하는 desktop Godot 예제다. 사용자가 승인한 Go 서버·Godot·3D 방향과 이번 실행 요청을 구체화한다. 소스 조사 기록 `work/godot-client/protocol-contract.md`는 당시 wire 조사 자료다. 이후 namespace 변경에는 [게임별 룸 분리 설계](game-isolation-design.md)와 [현재 서버 계약](../server-guide.md)이 우선하며, 이 문서는 성능 보장을 정의하지 않는다.
 
 ## 실행 결과와 범위
 
-`examples/godot/project.godot`을 Godot에서 열고 실행하면 한국어 lobby와 3D 게임 화면을 사용할 수 있다. 기본 endpoint는 `ws://127.0.0.1:8080/ws`다. URL을 바꾸고 연결하기, 1~6명 public/private 룸 생성, 6자리 번호 입장, 비밀번호 입력, public 목록 새로고침, host 시작, 퇴장과 수동 재연결을 제공한다. 하나의 창은 하나의 guest 연결을 소유한다. 외부 assets·SDK·dependency는 추가하지 않는다. 3D 구현과 실제 검증을 마친 뒤, 사용자의 추가 요청에 따라 동일한 서버 상태의 XZ 평면을 보여 주는 2D 화면과 검증을 추가한다. lobby에서 3D/2D 표시를 선택한다.
+`examples/godot/project.godot`을 Godot에서 열고 실행하면 한국어 lobby와 3D 게임 화면을 사용할 수 있다. 기본 endpoint는 `ws://127.0.0.1:8080/ws`다. URL을 바꾸고 연결하기, 1~6명 public/private 룸 생성, 6자리 번호 입장, 비밀번호 입력, public 목록 새로고침, host 시작, 퇴장과 수동 재연결을 제공한다. 하나의 창은 하나의 guest 연결을 소유한다. 외부 assets·SDK·dependency는 추가하지 않는다. 동일한 서버 상태의 XZ 평면을 보여 주는 2D 화면도 제공하며 상단 HUD에서 3D/2D 표시를 선택한다. 현재 실행·검증 범위는 [예제 안내](../../examples/godot/README.md)를 따른다.
 
 Godot 4.4 이상, GL Compatibility renderer, desktop을 대상으로 한다. API 최소 기준은 공식 4.4 문서이며 실제 실행 검증은 설치 엔진 4.7.2로만 수행한다. 코드 주석은 영어, UI·설명은 한국어, 서버 error message와 로그는 원문을 유지한다. web export·TLS 배포·production 부하·목표 Hz 달성은 검증 범위가 아니다. UI 한국어 glyph가 기본 font에서 누락되면 설치된 한국어 system font를 fallback으로 사용하고 외부 font를 내려받지 않는다.
 
@@ -46,6 +46,12 @@ flowchart LR
 
 한 파일이 transport·UI·world를 모두 소유하는 구조를 피한다. `.gd`와 `.gd.uid`는 version control에 포함하고 `.godot/` import cache, 로그·PNG·테스트 executable은 ignored `work/godot-client/`에 둔다.
 
+## 현행 namespace 계약
+
+초기 단일 `/ws`·Go 무변경 전제는 후속 namespace 작업이 확장했다. Go 변경은 namespace 작업이 담당했고 Godot 작업은 Go를 변경하지 않았다. 서버는 `GAME_IDS`로 게임을 등록한다. `CoopClient.connect_guest(base_url:String, game_id:String="default")->Error`는 query/fragment 없는 base URL에 명시적 game query를 붙인다. bare `/ws` 호환은 등록 목록이 정확히 `default` 하나일 때만 허용된다.
+
+`RoomState.game_id:String`, `accept_guest(id:String, game_id:String)->void`를 사용하며 연결의 게임은 고정된다. guest·list·모든 full snapshot의 `game_id`가 연결 게임과 맞지 않거나 누락되면 protocol 오류로 닫는다. leave는 게임 binding을 보존하고 새 연결은 비운다. version 1의 추가 필드를 엄격히 검사하는 구버전 client는 함께 업데이트해야 한다. 공개 namespace는 인증이 아니며 게임들은 전역 자원 한도·공통 이동 handler를 공유한다. 아래 과거 구현 순서와 시험 기록은 완료 증거로 소급 해석하지 않는다.
+
 ## 연결·요청·비밀 값
 
 `WebSocketPeer.connect_to_url()`은 비동기 연결 시작이다. 매 frame `poll()`하고 OPEN에서만 text를 보낸다. CONNECTING과 CLOSING도 poll하며 CLOSED에서 한 번만 cleanup한다. OPEN은 guest 준비 완료가 아니다. 첫 `session.guest`를 받기 전 room 버튼을 활성화하지 않는다. `get_packet()` 뒤 `was_string_packet()`을 검사하고 binary/깨진 JSON/잘못된 envelope는 연결 오류로 처리한다. 하나의 reader가 응답과 이벤트를 모두 dispatch한다. connect 전에 `inbound_buffer_size=1048576`, `outbound_buffer_size=1048576`, `max_queued_packets=256`을 설정한다. client text packet은 최대 1MiB, frame당 최대 64 packet을 처리한다. 서버의 요청 16KiB 제한과 room.list 응답 크기를 혼동하지 않는다.
@@ -81,7 +87,7 @@ W/S 또는 위/아래 화살표는 -Z/+Z, A/D 또는 왼쪽/오른쪽 화살표�
 
 입력 wire는 `{match_id,input_seq,action:{type:"move",direction:{x,y,z}}}`뿐이다. input_seq는 연결 수명 전체에서 1..9007199254740991 증가한다. 성공 send에 번호를 소비하고 거절된 요청도 다음 번호를 사용한다. ACK는 Apply+Tick 완료이며 위치를 포함하지 않는다. 자기 avatar도 snapshot position만 사용한다. local movement prediction, extrapolation, physics, collision, gravity, `@rpc`는 추가하지 않는다.
 
-카메라는 scene tree에 넣은 뒤 `look_at()`한다. Godot camera의 -Z forward 규칙을 따른다. 바닥은 시각적 plane이고 충돌 바닥이 아니다. avatar 중심을 위치에서 일정 높이만큼 띄워 캡슐을 보여 주되 서버 position 값은 변경하지 않는다. 자신은 색과 label로 구분하고 host도 표시한다. game world는 PLAYING에만 활성화한다.
+카메라는 scene tree에 넣은 뒤 `look_at()`한다. Godot camera의 -Z forward 규칙을 따른다. 바닥은 시각적 plane이고 충돌 바닥이 아니다. avatar 중심을 위치에서 일정 높이만큼 띄워 캡슐을 보여 주되 서버 position 값은 변경하지 않는다. `AvatarView.set_avatar_identity(id, is_self, is_host)`로 자신과 host를 색·label로 구분한다. 이 이름은 inherited `Node3D.set_identity()->void`와의 충돌을 피한다. game world는 PLAYING에만 활성화한다.
 
 보간은 local monotonic 수신 시계로 한다. 처음 받은 player는 최신 위치를 즉시 표시한다. 같은 room/match의 이전·최신 위치를 두 개만 보관하고 최신 수신 gap을 16~200ms로 clamp한다. `alpha=clamp((now-latest_received)/duration,0,1)`로 이전→최신 position을 lerp한다. 수신 gap이 500ms를 넘으면 이전 sample을 버리고 최신 위치로 즉시 snap한다. 새 snapshot이 없으면 최신 위치에서 멈춘다. 없어진 player는 최신 metadata/players에서 즉시 제거하고 이전 buffer에서 부활시키지 않는다. match/room/connection 변경 시 buffer를 비운다. burst나 긴 gap에서도 저장량과 표시 duration은 bounded다.
 

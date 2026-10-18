@@ -10,10 +10,16 @@
 
 **Spec:** [Godot client 설계](godot-client-design.md). 실행 기준 branch `codex/godot-client-example`, 시작 HEAD `59dccc33c5f4bb3f939efb77b588301b74ab5b6b`. wire 권위 자료는 `work/godot-client/protocol-contract.md`; 공식 API 자료는 `work/godot-client/official-godot-research.md`. 사용자가 실행과 AGENTS의 전문 agent 위임 방식을 제공했으므로 계획 후 같은 turn에서 순차 실행한다.
 
+## 후속 namespace 계약의 우선순위
+
+이 계획의 시작 commit·아래 TDD 예제·작업 순서는 당시 기록이다. 단일 `/ws`·Go 무변경 가정은 후속 [게임별 룸 분리 설계](game-isolation-design.md)와 [현재 서버 계약](../server-guide.md)이 확장했다. Go 변경은 namespace 작업 소유였고 Godot 작업은 이를 소비했다. 서버는 `GAME_IDS`로 게임을 등록하며 bare `/ws` 호환은 `default` 하나만 등록한 경우에 한정한다. 현행 adapter는 query/fragment 없는 base URL과 game ID를 받아 명시적으로 연결한다.
+
+아래 interface 표는 현행 signature를 반영한다. 연결의 `game_id`는 고정되고 guest/list/full snapshot의 일치를 검사한다. leave는 binding을 보존하며 새 연결은 비운다. version 1 응답의 추가 필드는 strict 구버전 client와 동시 업데이트가 필요하다. 공개 namespace는 인증이 아니며 모든 게임이 전역 자원 한도와 공통 movement handler를 공유한다. 현재 사용법·실행 결과는 [예제 안내](../../examples/godot/README.md)를 따르며 과거 계획을 완료 증거로 보지 않는다.
+
 ## Global Constraints
 
 - `Godot 4.4 이상, GL Compatibility renderer, desktop`을 대상으로 한다. 최소 API는 공식 4.4 문서, 실제 실행 검증은 설치 엔진 4.7.2로만 한다.
-- `외부 assets·SDK·dependency는 추가하지 않는다.` 기존 Go source/dependency는 변경하지 않는다.
+- `외부 assets·SDK·dependency는 추가하지 않는다.` Godot 작업은 Go source/dependency를 변경하지 않으며 후속 namespace 서버 변경은 별도 작업 소유다.
 - `코드 주석은 영어, UI·설명은 한국어, 서버 error message와 로그는 원문을 유지한다.`
 - `기본 endpoint는 ws://127.0.0.1:8080/ws`다. `하나의 창은 하나의 guest 연결을 소유한다.`
 - `room number는 ASCII [0-9] 6자리 string이며 선행 0을 보존한다.` 정원은 1~6명이다.
@@ -47,14 +53,14 @@
 | class | 공개 계약 |
 |---|---|
 | `WireCodec extends RefCounted` | static `encode_request(op:String,id:String,payload:Dictionary)->String`, `decode_server(text:String)->Dictionary`(`ok:bool,message:Dictionary,error:String`), `valid_room_number(number:String)->bool`, `valid_password(password:String)->bool`, `valid_create(capacity:int,visibility:String,password:String)->bool`, `create_payload(capacity:int,visibility:String,password:String)->Dictionary`, `join_payload(number:String,password:Variant=null)->Dictionary`. |
-| `RoomState extends RefCounted` | `session_id:String`, `current_snapshot:Dictionary`, `connection_generation:int`, `operation_epoch:int`; `new_connection(generation:int)->void`, `accept_guest(id:String)->void`, `begin_admission()->int`, `apply_admission(snapshot:Dictionary,epoch:int)->bool`, `apply_event(op:String,payload:Dictionary)->bool`, `clear_room()->void`. snapshot은 deep copy한다. |
-| `CoopClient extends Node` | `state:RoomState`, `next_input_seq:int=1`, `heartbeat_interval_ms:int=30000`, `request_timeout_ms:int=10000`, `max_pending:int=64`; `connect_guest(url:String)->Error`, `disconnect_guest()->void`, `create_room(capacity:int,visibility:String,password:String="")->String`, `join_room(number:String,password:Variant=null)->String`, `list_rooms()->String`, `leave_room()->String`, `start_room()->String`, `send_direction(direction:Vector3)->String`. 빈 request ID는 local 송신 거절을 뜻한다. |
+| `RoomState extends RefCounted` | `session_id:String`, `game_id:String`, `current_snapshot:Dictionary`, `connection_generation:int`, `operation_epoch:int`; `new_connection(generation:int)->void`, `accept_guest(id:String,game_id:String)->void`, `begin_admission()->int`, `apply_admission(snapshot:Dictionary,epoch:int)->bool`, `apply_event(op:String,payload:Dictionary)->bool`, `clear_room()->void`. snapshot은 deep copy한다. |
+| `CoopClient extends Node` | `state:RoomState`, `next_input_seq:int=1`, `heartbeat_interval_ms:int=30000`, `request_timeout_ms:int=10000`, `max_pending:int=64`; `connect_guest(base_url:String,game_id:String="default")->Error`, `disconnect_guest()->void`, `create_room(capacity:int,visibility:String,password:String="")->String`, `join_room(number:String,password:Variant=null)->String`, `list_rooms()->String`, `leave_room()->String`, `start_room()->String`, `send_direction(direction:Vector3)->String`. 빈 request ID는 local 송신 거절을 뜻한다. |
 | `CoopClient` signals | `connection_changed(status:String)`, `snapshot_changed(snapshot:Dictionary)`, `rooms_received(rooms:Array)`, `request_failed(op:String,code:String,message:String)`, `input_acknowledged(payload:Dictionary)`, `request_completed(op:String,request_id:String,payload:Dictionary,error:Dictionary)`. 성공 error와 실패 payload는 빈 Dictionary다. |
 | `CoopClient` test seams | `_socket_open()->bool`, `_send_text(text:String)->Error`, `_now_msec()->int`는 FakeClient에서 override할 수 있다.`_accept_text(text:String,generation:int,received_ms:int)->void`, `_expire_requests(now_ms:int)->void`는 deterministic test에서 직접 호출한다. 실제 공개 RPC도 같은 경로를 사용한다. |
 | `LobbyPanel extends Control` | `bind_client(client:CoopClient)->void`, `room_number_edit:LineEdit`, `join_password_edit:LineEdit`, `create_password_edit:LineEdit`, `status_label:Label`, `start_button:Button`, `_join_clicked()->void`, `_handle_failure(op:String,code:String,message:String)->void`, `_handle_snapshot(snapshot:Dictionary)->void`, `_handle_connection(status:String)->void`. |
 | `MovementInput extends RefCounted` | static `ensure_actions()->void`, `sample(focused:bool,text_input_focused:bool,allow_y:bool=true)->Vector3`, `release_actions()->void`. physical key mapping은 ensure_actions가 등록한다. |
 | `SnapshotBuffer extends RefCounted` | `push_snapshot(snapshot:Dictionary,received_ms:int)->bool`, `sample_positions(now_ms:int)->Dictionary`(`session_id -> Vector3`), `clear()->void`, `duration_ms:int`. |
-| `AvatarView extends Node3D` | `set_identity(id:String,is_self:bool,is_host:bool)->void`, `set_authoritative_position(position:Vector3)->void`. |
+| `AvatarView extends Node3D` | `set_avatar_identity(id:String,is_self:bool,is_host:bool)->void`, `set_authoritative_position(position:Vector3)->void`. |
 | `InputController extends Node` | `bind_client(client:CoopClient)->void`, `submit_direction(direction:Vector3)->void`, `set_input_gate(focused:bool,text_input_focused:bool)->void`, `set_view_mode(mode:String)->void`, `view_mode:String="3d"`, `_client:CoopClient`, `_last_sent_direction:Vector3=Vector3.ZERO`. 유일한 송신 소유자이며 성공 send에서만 last_sent_direction을 갱신한다. |
 | `GameWorld extends Node3D` | `bind_client(client:CoopClient)->void`, `reset_timeline(snapshot:Dictionary,received_ms:int)->void`, `avatars:Dictionary`(`session_id -> AvatarView`), `buffer:SnapshotBuffer`. renderer이며 요청을 보내지 않는다. |
 | `GameWorld2D extends Node2D` | `bind_client(client:CoopClient)->void`, `reset_timeline(snapshot:Dictionary,received_ms:int)->void`, static `project_position(position:Vector3)->Vector2`, `positions:Dictionary`(`session_id -> Vector2`), `buffer:SnapshotBuffer`, `pixel_scale:float=32.0`. renderer이며 요청을 보내지 않는다. |

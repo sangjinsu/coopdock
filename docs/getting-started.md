@@ -1,7 +1,7 @@
 # 빠른 시작
 
 CoopDock 서버를 로컬에서 실행하고, 실제 WebSocket 연결로 룸 입장과 3D 이동을 확인합니다.
-게임 화면 대신 함께 제공하는 Go 검증 CLI를 사용합니다.
+아래 Go 검증 CLI로 연결을 확인하고, [Godot 3D/2D 예제](../examples/godot/README.md)로 같은 서버에 게임 화면을 연결할 수 있습니다.
 
 [문서 길잡이](README.md) · [서버 사용·운영 가이드](server-guide.md)
 
@@ -79,5 +79,7 @@ go run ./cmd/roomcheck -url ws://127.0.0.1:8080/ws -movement=false -race-runs 3 
 모든 상태는 메모리에 있어 다음 실행 때 이어지지 않습니다.
 
 클라이언트 연결은 [실제 WebSocket 메시지](server-guide.md#실제-websocket-메시지)부터 확인합니다.
-Godot은 custom WebSocket + JSON client를 별도로 구현해야 합니다.
+Godot **4.4 API 기준**의 custom WebSocket + JSON 예제가 있으며 실제 실행 검증 엔진은 **4.7.2**입니다.
+[예제 안내](../examples/godot/README.md)를 따라 `examples/godot/project.godot`을 열어 두 창에서 같은 게임 ID와 룸으로 연결하세요.
+서버의 기본 게임은 `default`이며 다른 게임을 쓰려면 `GAME_IDS=default,game-a`로 등록합니다. Godot에는 query 없는 기본 URL과 게임 ID를 각각 입력합니다.
 브라우저 Origin 허용과 외부 WSS 연결, timeout, 종료 특성은 [서버 가이드](server-guide.md)에서 확인하세요.

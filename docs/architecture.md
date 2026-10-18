@@ -10,8 +10,8 @@
 
 ```mermaid
 flowchart LR
-    Client["게임 client"] --> WS["WebSocket transport"]
-    WS --> Manager["Manager admission gate"]
+    Client["Godot / 게임 client"] --> WS["WebSocket transport<br/>game_id 선택·고정"]
+    WS --> Manager["Manager admission gate<br/>게임별 번호 registry"]
     Manager --> Actor["Room actor"]
     Actor --> Game["GameHandler: movement"]
     Actor --> Outbox["reliable FIFO / latest snapshot"]
@@ -28,7 +28,9 @@ flowchart LR
     Admin --> Browser
 ```
 
-게임 입력은 room actor가 처리하고, 운영 조회는 별도 수집기가 만든 불변 cache를 읽습니다.
+게임 입력은 연결에 고정된 `game_id`의 room actor가 처리하고, 운영 조회는 별도 수집기가 만든 불변 cache를 읽습니다.
+번호는 게임 안에서만 고유하며 서로 다른 게임은 같은 번호를 가질 수 있습니다. 모든 게임은 현재 공통 movement handler와 전역 room/session·hash·IP 한도를 공유합니다. `game_id`는 공개 namespace이며 인증·게임별 자원 격리가 아닙니다.
+Godot의 [3D/2D renderer](../examples/godot/README.md)는 같은 authoritative snapshot을 표시하며 공통 InputController만 입력을 송신합니다.
 Actor→Outbox 선은 실제 `Session.Events`→transport outbox 단계를 요약합니다.
 Manager는 registry refs와 readiness, WS는 실제 live 연결 수를 수집기에 제공합니다.
 운영 GET에서 manager나 actor로 직접 조회하는 경로는 없습니다.
@@ -37,7 +39,7 @@ Manager는 registry refs와 readiness, WS는 실제 live 연결 수를 수집기
 
 - **게임 경로:** WebSocket transport가 받은 입력을 room actor와 movement handler가 처리합니다. 중요 응답·이벤트는 reliable FIFO로, 아직 보내지 않은 주기 snapshot은 최신 상태로 전달합니다. 정확한 tick·ACK·snapshot 규칙은 [실시간 3D reference 이동](server-guide.md#실시간-3d-reference-이동)을 참조하세요.
 - **관측 경로:** actor의 allowlist summary, Manager의 registry refs·readiness, transport의 실제 live 연결 수를 background collector가 수집합니다. Go runtime sampler는 별도로 동작합니다. 주기와 자료의 의미, 미측정 범위는 [화면과 자료의 의미](server-guide.md#화면과-자료의-의미)를 참조하세요.
-- **조회 경로:** 인증된 HTTP 요청은 게시된 운영 cache만 읽습니다. 화면과 API의 활성화·인증·조회 계약은 [운영 대시보드 켜기](server-guide.md#운영-대시보드-켜기)와 [룸 검색과 API](server-guide.md#룸-검색과-api)에 있습니다.
+- **조회 경로:** 인증된 HTTP 요청은 게시된 운영 cache만 읽습니다. 게임 ID exact 필터를 전체 cache에 적용한 뒤 `(game_id, room_number, room_id)` 순으로 정렬·pagination합니다. status와 목록 total은 모든 게임의 합계입니다. 화면과 API의 활성화·인증·조회 계약은 [운영 대시보드 켜기](server-guide.md#운영-대시보드-켜기)와 [룸 검색과 API](server-guide.md#룸-검색과-api)에 있습니다.
 
 현재 운영 기능은 조회 전용입니다. 상세 화면·kick·close·drain·commands·지속 audit 등 후속 범위는
 [운영 대시보드 스펙](specs/05-operations-dashboard.md)과 [운영 조작·종료 스펙](specs/06-operations-and-shutdown.md)에 정리되어 있습니다.

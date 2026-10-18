@@ -261,7 +261,9 @@ go build ./...
 
 ## 현재 단계
 
-현재 프로젝트는 초기 reference 단계입니다. free-space reference 3D 이동과 서버 동기화는 구현했습니다. 게임별 지형·충돌·중력·협동 목표·승패, admin 상세·조작·commands, 지속 audit, Godot client·SDK·게임 화면·보간·예측, 배포 구성, 자동 재접속 복원은 현재 미구현입니다. 실제 TCP 손실·jitter 주입, 운영 부하·수용 규모·UI 지연은 측정하지 않았습니다. deterministic barrier와 race 시험을 실제 네트워크 손실 시험이나 성능 보장으로 해석하지 않습니다. 미지원 WS op는 `INVALID_MESSAGE`입니다. 조회용 admin MVP는 위 인증 조건으로 제공하고 후속 admin 경로는 실행하지 않습니다. Godot은 후속 custom WebSocket + JSON client를 구현해야 합니다.
+현재 프로젝트는 초기 reference 단계입니다. 게임별 룸 namespace, free-space reference 3D 이동과 서버 동기화, 조회용 admin MVP, custom WebSocket + JSON [Godot desktop 3D/2D 예제](../examples/godot/README.md)를 제공합니다. 예제는 snapshot 위치만 표시하고 수신 간격 기반 bounded 보간을 사용합니다. 2D는 XZ를 32px/unit으로 표시하고 숨겨진 서버 Y를 보존합니다.
+
+게임별 지형·충돌·중력·협동 목표·승패, admin 상세·조작·commands, 지속 audit, 전용 SDK·local prediction, 배포 구성, 자동 재접속 복원은 현재 미구현입니다. 실제 TCP 손실·jitter 주입, 운영 부하·수용 규모·표시 지연·목표 Hz는 측정하지 않았습니다. Godot 4.4 API 기준이며 실제 엔진 검증은 4.7.2입니다. web export·TLS 배포·OS 수동 keyboard/focus 검증은 포함하지 않습니다. deterministic barrier와 race 시험을 실제 네트워크 손실 시험이나 성능 보장으로 해석하지 않습니다. 미지원 WS op는 `INVALID_MESSAGE`이며 후속 admin 경로는 실행하지 않습니다.
 
 ## 고정한 dependency와 공식 자료
 
