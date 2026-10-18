@@ -4,6 +4,16 @@ class_name WireCodec
 const MAX_SAFE_INTEGER: int = 9007199254740991
 const MAX_MESSAGE_BYTES: int = 1048576
 
+static func valid_game_id(game_id: String) -> bool:
+	if game_id.is_empty() or game_id.length() > 64:
+		return false
+	for index: int in game_id.length():
+		var code: int = game_id.unicode_at(index)
+		var alphanumeric: bool = (code >= 97 and code <= 122) or (code >= 48 and code <= 57)
+		if not alphanumeric and (index == 0 or code not in [45, 95]):
+			return false
+	return true
+
 static func valid_room_number(number: String) -> bool:
 	if number.length() != 6:
 		return false
@@ -64,8 +74,10 @@ static func _vector(value: Variant) -> bool:
 static func valid_snapshot(value: Variant) -> bool:
 	if not value is Dictionary:
 		return false
-	var required: Array = ["room_id", "room_number", "visibility", "capacity", "match_id", "phase", "host_id", "members", "revision", "game_state", "server_tick", "snapshot_seq", "last_processed_input_seq"]
+	var required: Array = ["game_id", "room_id", "room_number", "visibility", "capacity", "match_id", "phase", "host_id", "members", "revision", "game_state", "server_tick", "snapshot_seq", "last_processed_input_seq"]
 	if not _keys(value, required):
+		return false
+	if not value.game_id is String or not valid_game_id(value.game_id):
 		return false
 	if not _nonempty(value.room_id) or not value.room_number is String or not valid_room_number(value.room_number):
 		return false
@@ -105,7 +117,7 @@ static func valid_snapshot(value: Variant) -> bool:
 static func _valid_payload(op: String, payload: Dictionary, event: bool) -> bool:
 	match op:
 		"session.guest":
-			return event and _keys(payload, ["session_id"]) and _nonempty(payload.session_id)
+			return event and _keys(payload, ["session_id", "game_id"]) and _nonempty(payload.session_id) and payload.game_id is String and valid_game_id(payload.game_id)
 		"room.create", "room.join", "room.start", "game.started":
 			return _keys(payload, ["snapshot"]) and valid_snapshot(payload.snapshot) and (event if op == "game.started" else not event) and (op not in ["room.start", "game.started"] or payload.snapshot.phase == "PLAYING")
 		"room.state", "game.snapshot":

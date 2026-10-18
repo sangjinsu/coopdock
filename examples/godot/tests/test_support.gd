@@ -28,7 +28,7 @@ static func snapshot(room_id: String = "rA", match_id: Variant = null,
 		processed[id] = 0
 		players.append({"session_id": id, "position": {"x": index * 2, "y": 0, "z": 0},
 			"velocity": {"x": 0, "y": 0, "z": 0}})
-	return {"room_id": room_id, "room_number": "004271", "visibility": "public",
+	return {"game_id": "default", "room_id": room_id, "room_number": "004271", "visibility": "public",
 		"capacity": 6, "match_id": match_id,
 		"phase": "WAITING" if match_id == null else "PLAYING", "host_id": ids[0],
 		"members": members, "revision": revision,
@@ -42,7 +42,7 @@ static func event(op: String, payload: Variant, id: Variant = null, error: Varia
 static func ready_client(playing: bool = false) -> FakeClient:
 	var client: FakeClient = FakeClient.new()
 	client.state.new_connection(1)
-	client.state.accept_guest("sA")
+	client.state.accept_guest("sA", "default")
 	if playing:
 		var epoch: int = client.state.begin_admission()
 		client.state.apply_admission(snapshot("rA", "mA"), epoch)

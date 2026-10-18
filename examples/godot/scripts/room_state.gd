@@ -2,6 +2,7 @@ extends RefCounted
 class_name RoomState
 
 var session_id: String = ""
+var game_id: String = ""
 var current_snapshot: Dictionary = {}
 var connection_generation: int = 0
 var operation_epoch: int = 0
@@ -12,11 +13,13 @@ var _retired_matches: Dictionary = {}
 func new_connection(generation: int) -> void:
 	connection_generation = generation
 	session_id = ""
+	game_id = ""
 	clear_room()
 
-func accept_guest(id: String) -> void:
-	if session_id.is_empty():
+func accept_guest(id: String, game: String) -> void:
+	if session_id.is_empty() and not id.is_empty() and WireCodec.valid_game_id(game):
 		session_id = id
+		game_id = game
 
 func begin_admission() -> int:
 	operation_epoch += 1
@@ -29,7 +32,7 @@ func _includes_self(snapshot: Dictionary) -> bool:
 	return false
 
 func apply_admission(snapshot: Dictionary, epoch: int) -> bool:
-	if epoch != operation_epoch or session_id.is_empty() or not current_snapshot.is_empty() or not WireCodec.valid_snapshot(snapshot) or not _includes_self(snapshot):
+	if epoch != operation_epoch or session_id.is_empty() or not current_snapshot.is_empty() or not WireCodec.valid_snapshot(snapshot) or snapshot.game_id != game_id or not _includes_self(snapshot):
 		return false
 	current_snapshot = snapshot.duplicate(true)
 	_metadata_revision = int(snapshot.revision)
@@ -46,7 +49,7 @@ func apply_event(op: String, payload: Dictionary) -> bool:
 	if current_snapshot.is_empty() or session_id.is_empty():
 		return false
 	var incoming: Variant = payload.get("snapshot", {}) if op in ["game.started", "game.ended"] else payload
-	if not WireCodec.valid_snapshot(incoming):
+	if not WireCodec.valid_snapshot(incoming) or incoming.game_id != game_id:
 		return false
 	var snapshot: Dictionary = incoming
 	if snapshot.room_id != current_snapshot.room_id:

@@ -53,7 +53,7 @@ func test_wire_payloads() -> void:
 	client.free()
 
 func test_decode_envelope_and_numbers() -> void:
-	check(WireCodec.decode_server(Support.event("session.guest", {"session_id": "sA"})).ok, "guest decoded")
+	check(WireCodec.decode_server(Support.event("session.guest", {"session_id": "sA", "game_id": "default"})).ok, "guest decoded")
 	check(WireCodec.decode_server(Support.event("room.join", null, "r1", {"code": "PASSWORD_REQUIRED", "message": "Room password is required."})).ok, "server error decoded")
 	for text: String in ["[]", "null", "{", '{"version":1,"op":"room.state"}', '{"version":1,"op":"room.list","request_id":1,"payload":{},"error":null}', '{"version":true,"op":"room.list","request_id":"r1","payload":{},"error":null}', '{"version":1,"op":"room.list","request_id":"r1","payload":{},"error":{}}', '{"version":1,"op":"room.list","request_id":"r1","payload":null,"error":null}', '{"version":1,"op":"room.list","request_id":"r1","payload":{},"error":null,"extra":1}']:
 		check(not WireCodec.decode_server(text).ok, "invalid envelope rejected")
@@ -78,7 +78,7 @@ func test_decode_envelope_and_numbers() -> void:
 func test_state_fences() -> void:
 	var state: RoomState = RoomState.new()
 	state.new_connection(1)
-	state.accept_guest("sB")
+	state.accept_guest("sB", "default")
 	var epoch: int = state.begin_admission()
 	var admission: Dictionary = Support.snapshot("rA", null, 1, 1, ["sA", "sB"])
 	check(state.apply_admission(admission, epoch), "matching admission accepted")
@@ -98,7 +98,7 @@ func test_state_fences() -> void:
 func test_metadata_and_periodic_freshness() -> void:
 	var state: RoomState = RoomState.new()
 	state.new_connection(1)
-	state.accept_guest("sB")
+	state.accept_guest("sB", "default")
 	state.apply_admission(Support.snapshot("rA", "mA", 2, 2, ["sA", "sB"]), state.begin_admission())
 	check(state.apply_event("game.snapshot", Support.snapshot("rA", "mA", 4, 50, ["sA", "sB"])), "new periodic snapshot accepted")
 	check(not state.apply_event("game.snapshot", Support.snapshot("rA", "mA", 4, 50, ["sA", "sB"])), "duplicate periodic rejected")
@@ -211,7 +211,7 @@ func test_lifecycle_deadlines_and_list_isolation() -> void:
 func test_message_role_and_identity() -> void:
 	check(not WireCodec.decode_server(Support.event("room.create", {"snapshot": Support.snapshot()})).ok, "admission must be correlated RPC response")
 	check(not WireCodec.decode_server(Support.event("room.join", {"snapshot": Support.snapshot()})).ok, "join cannot be unsolicited event")
-	check(not WireCodec.decode_server(Support.event("session.guest", {"session_id": "sA"}, "rpc")).ok, "guest must be event")
+	check(not WireCodec.decode_server(Support.event("session.guest", {"session_id": "sA", "game_id": "default"}, "rpc")).ok, "guest must be event")
 	check(not WireCodec.decode_server(Support.event("room.state", Support.snapshot(), "rpc")).ok, "room state must be event")
 	check(not WireCodec.decode_server(Support.event("room.list", {}, "r1", {"code": "ERROR", "message": "invalid"})).ok, "error cannot include success payload")
 	var malformed: Dictionary = Support.snapshot("rA", "mA")

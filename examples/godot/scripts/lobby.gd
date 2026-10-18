@@ -14,6 +14,8 @@ var leave_button: Button
 var refresh_button: Button
 var capacity_select: OptionButton
 var visibility_select: OptionButton
+var game_id_edit: LineEdit
+var game_label: Label
 var url_edit: LineEdit
 var room_label: Label
 var members_label: Label
@@ -137,6 +139,13 @@ func _build_ui() -> void:
 	url_edit.text = "ws://127.0.0.1:8080/ws"
 	connect_button = _button("연결", connection, _connect_clicked)
 	disconnect_button = _button("연결 끊기", connection, _disconnect_clicked)
+	var game_row := HBoxContainer.new()
+	page.add_child(game_row)
+	_label("개발용 게임 ID", game_row)
+	game_id_edit = _edit("등록된 게임 ID", game_row)
+	game_id_edit.text = "default"
+	game_label = _label("연결 게임: 없음", game_row)
+	_label("이 예제의 개발 설정입니다. 배포 게임은 자신의 공개 ID를 코드나 설정에 지정하세요.", page, 14)
 	var columns := HBoxContainer.new()
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	columns.add_theme_constant_override("separation", 14)
@@ -200,6 +209,8 @@ func _refresh_gate() -> void:
 	connect_button.disabled = _status != "disconnected"
 	disconnect_button.disabled = _status == "disconnected" or _status == "closing"
 	url_edit.editable = _status == "disconnected"
+	game_id_edit.editable = _status == "disconnected"
+	game_label.text = "연결 게임: " + (_client.state.game_id if _client != null and not _client.state.game_id.is_empty() else (game_id_edit.text + " (연결 중)" if _status == "connecting" else "없음"))
 	create_button.disabled = not can_enter
 	join_button.disabled = not can_enter
 	room_number_edit.editable = can_enter
@@ -221,7 +232,7 @@ func _track_request(id: String) -> void:
 func _connect_clicked() -> void:
 	if _client == null or connect_button.disabled:
 		return
-	var result: Error = _client.connect_guest(url_edit.text)
+	var result: Error = _client.connect_guest(url_edit.text, game_id_edit.text)
 	if result != OK:
 		_handle_failure("session.guest", "CLIENT_CONNECT_FAILED", "WebSocket connection failed (%d)." % result)
 
@@ -346,7 +357,7 @@ func _handle_rooms(rooms: Array) -> void:
 func _handle_failure(op: String, code: String, message: String) -> void:
 	if not is_node_ready():
 		return
-	var guidance: Dictionary = {"PASSWORD_REQUIRED": "비공개 방입니다. 비밀번호를 입력하세요.", "PASSWORD_INVALID": "비밀번호를 확인하고 다시 입장하세요.", "ROOM_NOT_FOUND": "룸 번호를 확인하세요.", "ROOM_FULL": "방이 가득 찼습니다. 다른 방을 선택하세요.", "NOT_HOST": "방장만 게임을 시작할 수 있습니다.", "INVALID_PHASE": "현재 방 상태에서는 이 작업을 할 수 없습니다.", "CLIENT_TIMEOUT": "서버 응답 시간이 초과되었습니다. 연결 상태를 확인하세요.", "CLIENT_BUSY": "요청이 많습니다. 잠시 뒤 다시 시도하세요.", "CLIENT_SEND_FAILED": "요청을 보내지 못했습니다. 연결을 확인하세요."}
+	var guidance: Dictionary = {"PASSWORD_REQUIRED": "비공개 방입니다. 비밀번호를 입력하세요.", "PASSWORD_INVALID": "비밀번호를 확인하고 다시 입장하세요.", "ROOM_NOT_FOUND": "룸 번호를 확인하세요.", "ROOM_FULL": "방이 가득 찼습니다. 다른 방을 선택하세요.", "NOT_HOST": "방장만 게임을 시작할 수 있습니다.", "INVALID_PHASE": "현재 방 상태에서는 이 작업을 할 수 없습니다.", "CLIENT_TIMEOUT": "서버 응답 시간이 초과되었습니다. 연결 상태를 확인하세요.", "CLIENT_BUSY": "요청이 많습니다. 잠시 뒤 다시 시도하세요.", "CLIENT_SEND_FAILED": "요청을 보내지 못했습니다. 연결을 확인하세요.", "CLIENT_CONNECT_FAILED": "서버 주소와 등록된 게임 ID를 확인하세요.", "CLIENT_PROTOCOL": "서버의 게임 연결 정보가 올바르지 않습니다. 서버 설정을 확인하세요."}
 	status_label.text = "%s\n[%s] %s" % [guidance.get(code, "요청을 처리하지 못했습니다. 상태를 확인하고 다시 시도하세요."), code, message]
 	if op == "room.join" and code in ["PASSWORD_REQUIRED", "PASSWORD_INVALID"]:
 		join_password_edit.show()

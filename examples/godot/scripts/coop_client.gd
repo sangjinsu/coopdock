@@ -14,6 +14,7 @@ var heartbeat_interval_ms: int = 30000
 var request_timeout_ms: int = 10000
 var max_pending: int = 64
 var status: String = "disconnected"
+var _expected_game_id: String = ""
 var _peer: WebSocketPeer
 var _pending: Dictionary = {}
 var _request_counter: int = 0
@@ -25,23 +26,37 @@ func _set_status(value: String) -> void:
 		status = value
 		connection_changed.emit(status)
 
-func connect_guest(url: String) -> Error:
+func connect_guest(base_url: String, game_id: String = "default") -> Error:
+	if not WireCodec.valid_game_id(game_id) or not _valid_base_url(base_url):
+		return ERR_INVALID_PARAMETER
 	disconnect_guest()
+	_expected_game_id = game_id
 	if _peer != null:
 		_peer.close(-1)
 	_peer = WebSocketPeer.new()
 	_peer.inbound_buffer_size = 1048576
 	_peer.outbound_buffer_size = 1048576
 	_peer.max_queued_packets = 256
-	var result: Error = _peer.connect_to_url(url)
+	var result: Error = _peer.connect_to_url(base_url + "?game_id=" + game_id)
 	if result != OK:
+		_expected_game_id = ""
 		_peer = null
 		return result
 	_connecting_since_ms = _now_msec()
 	_set_status("connecting")
 	return OK
 
+func _valid_base_url(url: String) -> bool:
+	if url.contains("?") or url.contains("#") or url != url.strip_edges():
+		return false
+	var scheme_length: int = 5 if url.begins_with("ws://") else (6 if url.begins_with("wss://") else 0)
+	if scheme_length == 0:
+		return false
+	var authority: String = url.substr(scheme_length).get_slice("/", 0)
+	return not authority.is_empty() and not authority.contains(" ") and not authority.contains("\t") and not authority.contains("\n")
+
 func disconnect_guest() -> void:
+	_expected_game_id = ""
 	if _peer != null and _peer.get_ready_state() != WebSocketPeer.STATE_CLOSED:
 		_peer.close(1000, "Client disconnect")
 	_pending.clear()
@@ -155,13 +170,17 @@ func _accept_text(text: String, generation: int, received_ms: int) -> void:
 		return
 	var message: Dictionary = decoded.message
 	var op: String = message.op
+	if message.error == null and not _payload_matches_game(op, message.payload):
+		request_failed.emit(op, "CLIENT_PROTOCOL", "Server game binding does not match the connection.")
+		disconnect_guest()
+		return
 	if message.request_id == null:
 		if message.error != null:
 			request_failed.emit(op, message.error.code, message.error.message)
 		elif op == "session.guest":
 			if not state.session_id.is_empty() or status == "disconnected":
 				return
-			state.accept_guest(message.payload.session_id)
+			state.accept_guest(message.payload.session_id, message.payload.game_id)
 			_last_heartbeat_ms = received_ms
 			_set_status("guest")
 		elif state.apply_event(op, message.payload):
@@ -195,6 +214,21 @@ func _accept_text(text: String, generation: int, received_ms: int) -> void:
 				if payload.match_id == state.current_snapshot.get("match_id"):
 					input_acknowledged.emit(payload.duplicate(true))
 	request_completed.emit(op, id, payload, error)
+
+func _payload_matches_game(op: String, payload: Dictionary) -> bool:
+	var expected: String = _expected_game_id if not _expected_game_id.is_empty() else state.game_id
+	match op:
+		"session.guest":
+			return payload.game_id == expected
+		"room.create", "room.join", "room.start", "game.started", "game.ended":
+			return payload.snapshot.game_id == expected
+		"room.state", "game.snapshot":
+			return payload.game_id == expected
+		"room.list":
+			for room: Dictionary in payload.rooms:
+				if room.game_id != expected:
+					return false
+	return true
 
 func _expire_requests(now_ms: int) -> void:
 	var lifecycle_expired: bool = false
