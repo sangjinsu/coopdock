@@ -65,6 +65,7 @@ try:
         if '--actual-only' not in sys.argv and '--heartbeat-only' not in sys.argv:
             run([godot,'--headless','--path','examples/godot','--import'],'import-final')
             run([godot,'--headless','--path','examples/godot','--script','res://tests/run_unit.gd'],'unit-final')
+            run([godot,'--headless','--path','examples/godot','--script','res://tests/run_final_fix.gd'],'input-lifecycle-final')
         if '--heartbeat-only' not in sys.argv:
             proc,url=server('integration')
             run([godot,'--headless','--path','examples/godot','--script','res://tests/run_integration.gd','--','--url',url],'integration',45)

@@ -432,14 +432,17 @@ func test_direction_retry() -> void:
 	controller.bind_client(client)
 	controller.submit_direction(Vector3.FORWARD)
 	check(client.sent.is_empty(), "rejected direction remains unsent")
+	client.clock_ms += 100
 	controller.submit_direction(Vector3.FORWARD)
 	check(client.sent.size() == 1, "same direction retries after send failure")
+	Support.acknowledge_last(client)
 	controller.submit_direction(Vector3.FORWARD)
 	check(client.sent.size() == 1, "successful direction deduplicates")
 	controller.set_input_gate(false, false)
 	check(client.sent.size() == 2, "focus loss sends stop")
 	if client.sent.size() >= 2:
 		check(JSON.parse_string(client.sent.back()).payload.action.direction == {"x": 0.0, "y": 0.0, "z": 0.0}, "focus gate sends zero")
+	Support.acknowledge_last(client)
 	controller.set_input_gate(true, false)
 	client.state.clear_room()
 	client.snapshot_changed.emit({})
@@ -447,12 +450,14 @@ func test_direction_retry() -> void:
 	client.snapshot_changed.emit(client.state.current_snapshot)
 	controller.submit_direction(Vector3.FORWARD)
 	check(client.sent.size() == 3, "new match cannot dedup first direction against old match")
+	Support.acknowledge_last(client)
 	client.send_error = ERR_BUSY
 	# The subclass only fails once, so use pending saturation for stop retry.
 	client.max_pending = client._pending.size()
 	controller.set_input_gate(false, false)
 	check(controller._last_sent_direction == Vector3.FORWARD, "failed stop never updates successful direction")
 	client.max_pending = 64
+	client.clock_ms += 100
 	controller.set_input_gate(true, false)
 	controller.submit_direction(Vector3.RIGHT)
 	check(client.sent.size() >= 4 and JSON.parse_string(client.sent.back()).payload.action.direction == {"x": 0.0, "y": 0.0, "z": 0.0}, "stop retry precedes newly requested movement")
@@ -555,10 +560,12 @@ func test_mode_preserves_session() -> void:
 	check(controller.view_mode == "2d", "2D mode accepted")
 	check(controller._pending_stop, "failed mode stop remains pending")
 	client.send_error = OK
+	client.clock_ms += 100
 	controller.submit_direction(Vector3.RIGHT)
 	check(JSON.parse_string(client.sent.back()).payload.action.direction == {"x": 0.0, "y": 0.0, "z": 0.0}, "failed mode stop retries before movement")
 	check(client.state.session_id == "sA" and client.state.game_id == "default" and client.state.current_snapshot.room_id == "rA", "mode preserves game room session")
 	check(client.next_input_seq > next_before, "mode keeps monotonic input sequence")
+	Support.acknowledge_last(client)
 	controller.submit_direction(Vector3.UP)
 	check(controller._last_sent_direction.y == 0, "2D controller rejects vertical direction")
 	controller.submit_direction(Vector3.RIGHT)
@@ -617,6 +624,7 @@ func test_hud_long_game_ids() -> void:
 					await process_frame
 				var context := "%dpx physical %d-char game ID %s" % [width, length, mode]
 				check(WireCodec.valid_game_id(game_id), "HUD fixture valid " + context)
+				check(main._summary.mouse_filter != Control.MOUSE_FILTER_IGNORE, "HUD tooltip accepts hover " + context)
 				check(main.client.state.game_id == game_id and game_id in main._summary.tooltip_text, "HUD preserves full game ID in state and tooltip " + context)
 				for item: Control in main.view_select.get_parent().get_children():
 					var rect := item.get_global_rect()

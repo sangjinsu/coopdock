@@ -26,6 +26,8 @@ var _status: String = "disconnected"
 var _snapshot: Dictionary = {}
 var _room_numbers: Array[String] = []
 var _operation_pending: bool = false
+var _operation_id: String = ""
+var _operation_op: String = ""
 var _rooms_refresh_pending: bool = false
 
 func _ready() -> void:
@@ -41,6 +43,7 @@ func bind_client(client: CoopClient) -> void:
 	if _client != null:
 		_disconnect_signals()
 	_client = client
+	_clear_operation()
 	_rooms_refresh_pending = false
 	if _client != null:
 		_client.connection_changed.connect(_handle_connection)
@@ -59,7 +62,7 @@ func _disconnect_signals() -> void:
 	_client.request_completed.disconnect(_handle_completed)
 
 func _sync_client() -> void:
-	_operation_pending = false
+	_clear_operation()
 	_handle_connection(_client.status if _client != null else "disconnected")
 	_handle_snapshot(_client.state.current_snapshot if _client != null else {})
 
@@ -223,9 +226,16 @@ func _refresh_gate() -> void:
 	start_button.disabled = not connected or _operation_pending or _snapshot.get("phase") != "WAITING" or _snapshot.get("host_id", "") != _client.state.session_id
 	leave_button.disabled = not connected or _operation_pending or _snapshot.is_empty()
 
-func _track_request(id: String) -> void:
+func _clear_operation() -> void:
+	_operation_pending = false
+	_operation_id = ""
+	_operation_op = ""
+
+func _track_request(id: String, op: String) -> void:
 	if not id.is_empty():
 		_operation_pending = true
+		_operation_id = id
+		_operation_op = op
 		status_label.text = "서버 응답을 기다리는 중입니다."
 	_refresh_gate()
 
@@ -253,7 +263,7 @@ func _join_clicked() -> void:
 		if not WireCodec.valid_password(password):
 			status_label.text = "비밀번호는 4~64자로 입력하세요."
 			return
-	_track_request(_client.join_room(number, password))
+	_track_request(_client.join_room(number, password), "room.join")
 
 func _create_clicked() -> void:
 	if _client == null or create_button.disabled:
@@ -263,16 +273,16 @@ func _create_clicked() -> void:
 	if not WireCodec.valid_create(capacity_select.get_selected_id(), visibility, password):
 		status_label.text = "비공개 방 비밀번호는 4~64자로 입력하세요."
 		return
-	_track_request(_client.create_room(capacity_select.get_selected_id(), visibility, password))
+	_track_request(_client.create_room(capacity_select.get_selected_id(), visibility, password), "room.create")
 
 func _start_clicked() -> void:
 	if _client != null and not start_button.disabled:
-		_track_request(_client.start_room())
+		_track_request(_client.start_room(), "room.start")
 
 func _leave_clicked() -> void:
 	if _client != null and not leave_button.disabled:
 		_clear_secrets()
-		_track_request(_client.leave_room())
+		_track_request(_client.leave_room(), "room.leave")
 
 func _refresh_clicked() -> void:
 	if _client != null and not refresh_button.disabled:
@@ -306,7 +316,7 @@ func _handle_connection(status: String) -> void:
 	if status in ["disconnected", "closing"]:
 		_clear_secrets()
 		_snapshot = {}
-		_operation_pending = false
+		_clear_operation()
 		_rooms_refresh_pending = false
 		_room_numbers.clear()
 		rooms_list.clear()
@@ -322,7 +332,6 @@ func _handle_snapshot(snapshot: Dictionary) -> void:
 	if not is_node_ready():
 		return
 	_clear_secrets()
-	_operation_pending = false
 	if snapshot.is_empty():
 		room_label.text = "입장한 방이 없습니다"
 		members_label.text = "방을 만들거나 번호로 입장하세요."
@@ -364,9 +373,9 @@ func _handle_failure(op: String, code: String, message: String) -> void:
 		join_password_edit.grab_focus()
 	_refresh_gate()
 
-func _handle_completed(op: String, _id: String, _payload: Dictionary, error: Dictionary) -> void:
-	if op in ["room.create", "room.join", "room.start", "room.leave"]:
-		_operation_pending = false
+func _handle_completed(op: String, id: String, _payload: Dictionary, error: Dictionary) -> void:
+	if _operation_pending and id == _operation_id and op == _operation_op:
+		_clear_operation()
 		if error.is_empty() and op == "room.leave":
 			status_label.text = "방에서 나왔습니다."
 		_refresh_gate()

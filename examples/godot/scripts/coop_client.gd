@@ -237,7 +237,9 @@ func _expire_requests(now_ms: int) -> void:
 		if now_ms < int(pending.deadline):
 			continue
 		_pending.erase(id)
-		request_failed.emit(pending.op, "CLIENT_TIMEOUT", "Local request deadline exceeded.")
+		var error := {"code": "CLIENT_TIMEOUT", "message": "Local request deadline exceeded."}
+		request_failed.emit(pending.op, error.code, error.message)
+		request_completed.emit(pending.op, id, {}, error)
 		if pending.op in ["room.create", "room.join", "room.start", "room.leave"]:
 			lifecycle_expired = true
 	if lifecycle_expired:

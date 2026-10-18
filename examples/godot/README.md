@@ -55,9 +55,9 @@ version 1 응답의 guest·full snapshot 및 room list에 추가된 `game_id`를
 
 2D는 서버 위치의 `Vector2(x,z)`를 **32px/unit**으로 투영합니다. 서버 Y는 숨겨져 있을 뿐 보존됩니다. 2D 입력의 `direction.y`는 0이며, 3D에서 높이를 바꾼 뒤 2D로 전환해 이동해도 기존 Y는 유지합니다. 바닥과 격자는 시각 표시입니다. 이동은 free-space reference이며 충돌·중력·지형·협동 목표가 없습니다.
 
-자기 avatar를 포함해 모든 위치는 **서버 snapshot만** 사용합니다. local prediction·extrapolation·physics·Godot `@rpc`는 사용하지 않습니다. 청록색은 자신, 주황색은 다른 참가자이고 방장을 label로 구분합니다. 플레이어가 제거되면 이전 보간 buffer에서 다시 나타나지 않습니다. 근접 avatar label의 모든 배치에서 겹침을 피하는 기능은 없습니다.
+자기 avatar를 포함해 모든 위치는 **서버 snapshot만** 사용합니다. local prediction·extrapolation·physics·Godot `@rpc`는 사용하지 않습니다. 청록색은 자신, 주황색은 다른 참가자이고 방장을 label로 구분합니다. 플레이어가 제거되면 이전 보간 buffer에서 다시 나타나지 않습니다. 근접 avatar의 여러 줄 label이 겹칠 수 있으며 이는 수용한 prototype 표시 한계입니다. 가까운 플레이어의 역할/짧은 ID 가독성이 낮아질 수 있고, 전체 identity는 모델과 로비에 유지됩니다. 배치 개선은 후속입니다.
 
-입력 송신은 하나의 `InputController`가 담당합니다. 포커스 상실·텍스트 입력 중·키 해제·모드 전환 시 zero 방향을 요청합니다. 포커스를 되찾아도 키를 다시 입력해야 이동합니다. 송신 거절된 zero는 다음 송신에서 새 방향보다 먼저 재시도합니다. 모드 전환은 키 상태와 표시 timeline을 초기화하고 game/session/room/match 소속과 `input_seq`를 유지합니다. 같은 socket의 퇴장·새 룸·새 match에서도 sequence를 유지하며 새 연결에서만 1부터 시작합니다.
+입력 송신은 하나의 `InputController`가 담당합니다. 포커스 상실·텍스트 입력 중·키 해제·모드 전환 시 zero 방향을 요청합니다. 포커스를 되찾아도 키를 다시 입력해야 이동합니다. 로컬 전송만으로 처리를 확정하지 않습니다. 현재 요청 ID·input_seq의 ACK 또는 authoritative 처리 sequence를 확인합니다. `SERVER_BUSY`·`REQUEST_TIMEOUT`·`CLIENT_TIMEOUT`·일시적인 로컬 송신 실패는 현재 의도에 한해 100→200→400→800→1000ms(상한) 간격으로 재시도하며, 새 sequence를 사용합니다. 실패하거나 아직 확인되지 않은 zero는 처리 확인까지 새 이동보다 우선합니다. 영구 오류는 자동 반복하지 않습니다. 정지가 영구 거절되면 이동을 막고 퇴장/재입장·새 match·재연결 때 추적을 초기화합니다. 모드 전환은 키 상태와 표시 timeline을 초기화하고 game/session/room/match 소속과 `input_seq`를 유지합니다. 같은 socket의 퇴장·새 룸·새 match에서도 sequence를 유지하며 새 연결에서만 1부터 시작합니다.
 
 보간은 local monotonic **수신 시각**과 수신 간격을 쓰며 duration은 16~200ms입니다. 500ms를 넘는 gap에서는 이전 sample을 버리고 즉시 snap합니다. 보간에는 추가 표시 지연이 있습니다. 서버 simulation clock과 각 창의 receive clock은 동기화되지 않으므로 같은 snapshot을 받아도 두 창의 순간 표시 위치·보간 alpha가 같다고 보장하지 않습니다. 설정된 Hz나 tick 개수로 실제 처리율·표시 지연을 추정하지 않습니다.
 
@@ -77,18 +77,19 @@ GODOT_CHECKS_OUTPUT_DIR=work/godot-client/local examples/godot/tests/run_checks.
 GODOT_CHECKS_OUTPUT_DIR=work/godot-client/local-mixed examples/godot/tests/run_checks.sh --mixed-native
 ```
 
-기본 runner는 import → unit → 실제 wire → 짧은 timeout heartbeat 순서입니다. 임시 localhost port를 골라 `GAME_IDS=default` 서버를 build/start하고, 상속받은 `ROOM_*`·`WS_*`·`ADMIN_*` 설정을 제거해 검사 조건을 고정합니다. 실행별 argv·exit·owned PID는 출력 경로의 `runner-checks.json` 또는 `runner-mixed-native.json`에 남습니다. 각 단계에는 deadline이 있으며 finally에서 자신이 시작한 process만 종료하고 wait합니다. Godot SCRIPT ERROR/engine ERROR와 nonzero exit는 실패입니다. GUI·socket 실행이 제한된 환경에서는 해당 실행 권한이 필요합니다.
+기본 runner는 import → unit → 입력/lifecycle 회귀 → 실제 wire → 짧은 timeout heartbeat 순서입니다. 임시 localhost port를 골라 `GAME_IDS=default` 서버를 build/start하고, 상속받은 `ROOM_*`·`WS_*`·`ADMIN_*` 설정을 제거해 검사 조건을 고정합니다. 실행별 argv·exit·owned PID는 출력 경로의 `runner-checks.json` 또는 `runner-mixed-native.json`에 남습니다. 각 단계에는 deadline이 있으며 finally에서 자신이 시작한 process만 종료하고 wait합니다. Godot SCRIPT ERROR/engine ERROR와 nonzero exit는 실패입니다. GUI·socket 실행이 제한된 환경에서는 해당 실행 권한이 필요합니다.
 
 | 구분 | 관측한 범위 |
 |---|---|
-| 기본 assembled 실행 | import, unit **354 checks / 0 failures**, 실제 wire **62 / 0**, `WS_READ_TIMEOUT=3s`·heartbeat 1초로 6초 유지 **5 / 0** |
+| 최종 수정 전 기본 assembled 실행 | import, unit **354 checks / 0 failures**, 실제 wire **62 / 0**, `WS_READ_TIMEOUT=3s`·heartbeat 1초로 6초 유지 **5 / 0** |
 | 별도 3D native | 두 실제 native 창, host **21 / 0**·peer **18 / 0**, 공통 full capture 16개 |
 | 별도 mixed native | 두 실제 native 창 + 네 headless, 독립 guest 6개. host **48 / 0**, peer **66 / 0**, headless 각각 **32 / 0**, 공통 PLAYING full capture **85개** |
-| 긴 game ID HUD | 7/48/64자 × 3D/2D × 두 창 크기 unit/geometry, native 한 창 fixture PNG. 실제 tooltip hover는 검증하지 않음 |
-| 별도 namespace adapter | unit **58**, 실제 Godot socket 4개 **89** 검사. 기본 runner와 별도 근거 |
+| 긴 game ID HUD | 7/48/64자 × 3D/2D × 두 창 크기 unit/geometry, native 한 창 fixture PNG. 후속 headless synthetic hover에서 visible popup 1개와 전체 tooltip 문자열 확인. 사람의 native hover 관측은 아님 |
+| 별도 namespace adapter | 최초 unit **58**·실제 Godot socket 4개 **89**. 최종 수정에서 namespace unit **58 / 0** 재확인 |
+| 최종 수정 covering | 입력·lifecycle 회귀 **77 / 0**, 기존 변경 영역 unit **260 / 0**. 단일 실제 WebSocketPeer와 controlled 응답 peer로 거절/timeout 후 seq1~7 복구. 실제 Go queue 포화 재현은 아님 |
 
 공통 full-state 비교는 같은 `(game_id,room_id,match_id,revision,server_tick,snapshot_seq)` 전체 snapshot deep equality입니다. mixed 검사는 hidden Y=2.5 보존, 2D Q/E 비활성, mode 전환 zero ACK와 `input_seq` 연속성을 포함합니다. native 입력은 synthetic physical key와 explicit focus signal이며 **OS 수동 keyboard/focus 시험은 아닙니다**. namespace의 같은 번호 공존은 deterministic core 시험 근거이며 실제 네 socket이 고정 같은 번호를 입증한 것은 아닙니다.
 
-위 native/mixed/namespace 기록은 해당 source 검증과 이후 변경 파일의 별도 covering 근거를 구분해 재사용했습니다. 기본 runner가 이 모든 suite나 Go full/race를 실행하는 것은 아닙니다. Go 검사 명령은 [서버 검증](../../docs/server-guide.md#종료와-검증)을 참조하세요.
+최종 수정은 InputController·CoopClient·Lobby·Main을 변경했습니다. 따라서 예전 namespace 네 GD 파일이 모두 동일하다는 근거를 더는 적용하지 않습니다. 과거 실제 4-socket/6-socket/native 기록은 당시 소스의 통합 근거로 보존하고, 변경된 요청 완료·입력·UI 경계는 위 focused units와 controlled wire/hover로 연결합니다. wire/260-unit/hover 실행 뒤 추가한 유일한 production 변경은 `REQUEST_TIMEOUT` transient 분류이며 최종 77-check에서 검사했습니다. 최종 수정 후 기본 assembled 전체나 mixed/native 전체를 다시 실행했다는 뜻은 아닙니다. 기본 runner가 이 모든 suite나 Go full/race를 실행하는 것은 아닙니다. Go 검사 명령은 [서버 검증](../../docs/server-guide.md#종료와-검증)을 참조하세요.
 
 web export·TLS 배포·production 부하/수용 규모·목표 Hz 달성·Godot 4.4 runtime·실제 OS keyboard/focus는 검증 범위 밖입니다. [검증 계획](../../docs/specs/08-validation.md)은 향후 게임 규칙·성능 시험까지 포함하므로 현재 실행 결과와 구분하세요.

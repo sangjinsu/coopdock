@@ -47,6 +47,7 @@ func _ready() -> void:
 	_summary = Label.new()
 	_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_summary.clip_text = true
+	_summary.mouse_filter = Control.MOUSE_FILTER_PASS
 	_summary.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	bar.add_child(_summary)
 	view_select = OptionButton.new()

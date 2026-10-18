@@ -122,10 +122,10 @@ race 검사 통과와 위 상황 시험, 실제 게임 판정·성능 측정 결
 
 ## Godot desktop 예제의 별도 검증
 
-재현 명령과 실행 방법은 [Godot 3D/2D 예제](../../examples/godot/README.md#검증-명령과-확인한-범위)에 있다. 기본 runner는 import·unit **354 checks**·실제 WebSocket **62 checks**·짧은 read timeout heartbeat **5 checks**를 수행한다. Go 서버를 현재 source로 build하지만 Go full/race suite를 실행하는 명령은 아니다.
+재현 명령과 실행 방법은 [Godot 3D/2D 예제](../../examples/godot/README.md#검증-명령과-확인한-범위)에 있다. 최종 수정 전 기본 runner 실행은 import·unit **354 checks**·실제 WebSocket **62 checks**·짧은 read timeout heartbeat **5 checks**를 통과했다. 현재 runner에는 입력/lifecycle 회귀 단계도 추가되어 있으며 전체 assembled 재실행과 구분한다. Go 서버를 현재 source로 build하지만 Go full/race suite를 실행하는 명령은 아니다.
 
-별도 native 3D 두 창과 mixed 3D/2D 두 native + 네 headless, 총 여섯 guest의 공통 full snapshot 비교를 수행했다. mixed 실행에서 동일 `(game_id, room_id, match_id, revision, server_tick, snapshot_seq)` **85개**의 full 상태를 비교했고 2D XZ 투영·숨겨진 Y 보존·모드 전환 zero/input_seq 연속성·player 제거를 확인했다. native 입력은 synthetic physical key와 explicit focus signal이며 수동 OS keyboard/focus 검증이 아니다. 긴 game ID HUD는 별도 unit/geometry와 native 한 창 fixture로 확인했으며 실제 tooltip hover는 검증하지 않았다.
+별도 native 3D 두 창과 mixed 3D/2D 두 native + 네 headless, 총 여섯 guest의 공통 full snapshot 비교를 수행했다. mixed 실행에서 동일 `(game_id, room_id, match_id, revision, server_tick, snapshot_seq)` **85개**의 full 상태를 비교했고 2D XZ 투영·숨겨진 Y 보존·모드 전환 zero/input_seq 연속성·player 제거를 확인했다. native 입력은 synthetic physical key와 explicit focus signal이며 수동 OS keyboard/focus 검증이 아니다. 긴 game ID HUD는 별도 unit/geometry와 native 한 창 fixture로 확인했으며 후속 headless synthetic hover에서 visible PopupPanel과 전체 tooltip 문자열을 확인했다. 사람의 native hover 검증은 아니다.
 
-namespace는 별도 unit **58**과 실제 네 Godot socket **89** 검사를 수행한 증거를 재사용한다. 기본 runner에 해당 namespace 검사가 포함된 것은 아니다. 서로 다른 게임의 같은 번호 공존은 deterministic core 근거이며 실제 네 socket으로 고정 같은 번호를 입증했다고 표현하지 않는다. 운영 정렬 계약의 모든 tie-break가 단일 룸/게임 실행으로 증명된 것도 아니다.
+namespace의 최초 unit **58**과 실제 네 Godot socket **89** 검사는 당시 소스 근거다. 최종 수정으로 CoopClient/Lobby가 바뀌어 기존 네 GD 전체 동일성에 의한 재사용은 종료했다. 새 namespace unit **58 / 0**, 입력/lifecycle 회귀 **77 / 0**, 기존 변경 영역 unit **260 / 0**, 단일 실제 WebSocketPeer와 controlled 응답 peer의 거절/timeout 정지 복구로 변경 경계를 보완했다. 이 wire 검사는 Go queue 포화 재현이 아니다. wire/260-unit/hover 이후 production 차이는 `REQUEST_TIMEOUT` transient 분류뿐이며 최종 77-check에 포함된다. 기본 runner에 해당 namespace 검사가 포함된 것은 아니다. 서로 다른 게임의 같은 번호 공존은 deterministic core 근거이며 실제 네 socket으로 고정 같은 번호를 입증했다고 표현하지 않는다. 운영 정렬 계약의 모든 tie-break가 단일 룸/게임 실행으로 증명된 것도 아니다.
 
-최소 API는 Godot 4.4 기준, 실제 엔진은 4.7.2다. 보간은 동기화되지 않은 local receive clock을 쓰며 추가 표시 지연이 있다. web export·TLS 배포·목표 Hz·production 부하와 모든 근접 avatar label 배치의 가독성은 검증하지 않았다.
+최소 API는 Godot 4.4 기준, 실제 엔진은 4.7.2다. 보간은 동기화되지 않은 local receive clock을 쓰며 추가 표시 지연이 있다. web export·TLS 배포·목표 Hz·production 부하는 검증하지 않았다. 근접 avatar Label3D overlap은 수용한 prototype 표시 한계로 남으며 전체 identity는 모델/로비에 유지한다. 과거 Task2의 최초 구현이 meaningful RED보다 앞선 TDD 절차 이탈과 Task4 중간 unit 1-failure 원본 로그 미보존은 그대로 기록하며, 이번 RED/GREEN으로 과거 절차를 충족했다고 소급하지 않는다.

@@ -56,3 +56,9 @@ class FailOnceClient extends FakeClient:
 			return ERR_BUSY
 		sent.append(text)
 		return OK
+
+static func acknowledge_last(client: FakeClient) -> void:
+	var request: Dictionary = JSON.parse_string(client.sent.back())
+	client._accept_text(event("game.action", {"match_id": request.payload.match_id,
+		"input_seq": request.payload.input_seq, "server_tick": 1}, request.request_id),
+		client.state.connection_generation, client.clock_ms)
