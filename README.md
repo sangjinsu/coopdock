@@ -1,12 +1,14 @@
 # CoopDock · 코옵독
 
+[![CoopDock v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/sangjinsu/coopdock/releases/tag/v0.1.0)
+
 **방을 만들고, 친구를 초대하고, 함께 움직이세요.**
 
 CoopDock은 **1~6인 룸형 협동 게임을 위한 Go 서버 프로젝트**입니다.
 6자리 룸 번호로 모여 서버가 계산한 상태를 공유합니다.
 룸 입장부터 실시간 이동, Godot 게임 화면과 운영 조회까지 한 저장소에서 시작하세요.
 
-[빠른 시작](docs/getting-started.md) · [Godot 3D/2D 예제](examples/godot/README.md) · [서버 사용·운영 가이드](docs/server-guide.md)
+[빠른 시작](docs/getting-started.md) · [Godot 3D/2D 예제](examples/godot/README.md) · [서버 사용·운영 가이드](docs/server-guide.md) · [v0.1.0 릴리스](https://github.com/sangjinsu/coopdock/releases/tag/v0.1.0)
 
 ## 작은 협동 게임을 위한 출발점
 
