@@ -2,7 +2,7 @@ package transport
 
 import (
 	"context"
-	"roomserver/internal/protocol"
+	"github.com/sangjinsu/coopdock/internal/protocol"
 	"sync"
 )
 

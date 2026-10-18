@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"roomserver/internal/game"
+	"github.com/sangjinsu/coopdock/internal/game"
 )
 
 func awaitGameEvent(t *testing.T, s *Session, op string) Event {

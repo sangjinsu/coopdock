@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"github.com/coder/websocket"
 	"os"
-	"roomserver/internal/protocol"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/protocol"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"time"
 )
 

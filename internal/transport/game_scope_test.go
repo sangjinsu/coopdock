@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"strings"
 	"sync"
 	"testing"

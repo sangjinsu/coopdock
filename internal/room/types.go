@@ -1,7 +1,7 @@
 package room
 
 import (
-	"roomserver/internal/game"
+	"github.com/sangjinsu/coopdock/internal/game"
 	"time"
 )
 

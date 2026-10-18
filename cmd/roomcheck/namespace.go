@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"strings"
 
-	"roomserver/internal/game"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/game"
+	"github.com/sangjinsu/coopdock/internal/room"
 )
 
 func checkerURL(base, gameID string) (string, error) {

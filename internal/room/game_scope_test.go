@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"roomserver/internal/game"
+	"github.com/sangjinsu/coopdock/internal/game"
 	"strings"
 	"sync/atomic"
 	"testing"

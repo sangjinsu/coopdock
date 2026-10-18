@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"sync"
 	"testing"
 	"time"

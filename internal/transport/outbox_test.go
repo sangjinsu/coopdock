@@ -3,7 +3,7 @@ package transport
 import (
 	"context"
 	"reflect"
-	"roomserver/internal/protocol"
+	"github.com/sangjinsu/coopdock/internal/protocol"
 	"testing"
 )
 

@@ -6,17 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sangjinsu/coopdock"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"roomserver/internal/admin"
-	"roomserver/internal/config"
-	"roomserver/internal/observability"
-	"roomserver/internal/room"
-	"roomserver/internal/transport"
 	"strings"
 	"syscall"
 	"testing"
@@ -25,217 +21,64 @@ import (
 
 const viewerToken = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-func services(t *testing.T) (*room.Manager, *transport.Server) {
-	t.Helper()
-	m, e := room.NewManager(room.DefaultConfig())
-	if e != nil {
-		t.Fatal(e)
-	}
-	s, e := transport.New(m, transport.DefaultConfig())
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if e := s.Close(ctx); e != nil {
-			t.Error(e)
-		}
-	})
-	return m, s
-}
-func collectServices(t *testing.T, m *room.Manager, s *transport.Server) *observability.Collector {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	c, e := observability.New(ctx, observability.Source{Rooms: m.OperationsSnapshot, Transport: s.LiveStatus}, observability.DefaultConfig())
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if e := c.Close(ctx); e != nil {
-			t.Error(e)
-		}
-	})
-	return c
-}
-func request(h http.Handler, method, path string, auth bool) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, path, nil)
-	if auth {
-		r.SetBasicAuth("viewer", viewerToken)
-	}
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	return w
-}
-func TestBuildHandlerRouting(t *testing.T) {
-	m, s := services(t)
-	for _, enabled := range []bool{false, true} {
-		cfg := config.Config{}
-		var c *observability.Collector
-		if enabled {
-			cfg.Admin = admin.Config{ViewerToken: viewerToken}
-			c = collectServices(t, m, s)
-		}
-		h, e := buildHandler(cfg, s, c)
-		if e != nil {
-			t.Fatal(e)
-		}
-		for _, path := range []string{"/healthz", "/readyz", "/ws", "/administrator"} {
-			w := request(h, "GET", path, false)
-			want := 200
-			if path == "/ws" {
-				want = 426
-			}
-			if path == "/administrator" {
-				want = 404
-			}
-			if w.Code != want {
-				t.Errorf("public %s=%d want %d", path, w.Code, want)
-			}
-		}
-		for _, path := range []string{"/admin", "/admin/", "/admin/api/status", "/admin//api/status", "/admin/./api/status", "/admin/../healthz", "/admin/assets/../dashboard.css"} {
-			for _, auth := range []bool{false, true} {
-				w := request(h, "GET", path, auth)
-				want := 404
-				if enabled && !auth {
-					want = 401
-				}
-				if enabled && auth && (path == "/admin" || path == "/admin/" || path == "/admin/api/status") {
-					want = 200
-				}
-				if w.Code != want || w.Header().Get("Location") != "" {
-					t.Errorf("admin enabled=%v auth=%v %s=%d want %d", enabled, auth, path, w.Code, want)
-				}
-				if w.Header().Get("Cache-Control") != "no-store" {
-					t.Error("admin prefix lost protection")
-				}
-			}
-		}
-		if enabled {
-			w := request(h, "GET", "/admin/api/status", true)
-			var v map[string]any
-			if e := json.Unmarshal(w.Body.Bytes(), &v); e != nil {
-				t.Fatal(e)
-			}
-			if v["generation"] != float64(1) || v["ready"] != true || v["server_instance_id"] == "" {
-				t.Error("handler available before first valid cache")
-			}
-		}
-	}
-	if _, e := buildHandler(config.Config{Admin: admin.Config{ViewerToken: viewerToken}}, s, nil); e == nil {
-		t.Error("active nil cache accepted")
-	}
-}
+type failedShutdown struct{ called bool }
 
-func TestCloseServicesStopsAllAfterEarlierError(t *testing.T) {
-	m, s := services(t)
+func (s *failedShutdown) Shutdown(ctx context.Context) error {
+	s.called = true
+	return errors.New("core shutdown failed")
+}
+func TestCloseServicesStopsHTTPAfterCoreError(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
-	calls := 0
-	c, e := observability.New(context.Background(), observability.Source{Rooms: func() room.OperationsSnapshot {
-		calls++
-		if calls == 2 {
-			close(entered)
-			<-release
-		}
-		return m.OperationsSnapshot()
-	}, Transport: s.LiveStatus}, observability.Config{Interval: time.Millisecond})
-	if e != nil {
-		t.Fatal(e)
-	}
-	released := false
-	defer func() {
-		if !released {
-			close(release)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if e := c.Close(ctx); e != nil {
-			t.Error(e)
-		}
-	}()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("source did not block")
-	}
-	requestEntered, requestRelease := make(chan struct{}), make(chan struct{})
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		close(requestEntered)
-		<-requestRelease
-		w.WriteHeader(200)
-	}))
-	defer httpServer.Close()
-	defer close(requestRelease)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(entered); <-release }))
+	defer host.Close()
+	defer close(release)
 	go func() {
-		response, err := httpServer.Client().Get(httpServer.URL)
+		response, err := host.Client().Get(host.URL)
 		if err == nil {
 			_ = response.Body.Close()
 		}
 	}()
 	select {
-	case <-requestEntered:
+	case <-entered:
 	case <-time.After(time.Second):
-		t.Fatal("HTTP request did not block")
+		t.Fatal("request did not enter")
 	}
 	called := make(chan struct{})
-	httpServer.Config.RegisterOnShutdown(func() {
-		if v := c.Load(); v.State != observability.Stopping || v.Ready {
-			t.Error("HTTP shutdown preceded stopping overlay")
-		}
-		_, stopping := s.LiveStatus()
-		if !stopping {
-			t.Error("HTTP shutdown preceded transport close")
-		}
-		close(called)
-	})
+	host.Config.RegisterOnShutdown(func() { close(called) })
+	core := &failedShutdown{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	e = closeServices(ctx, s, httpServer.Config, c)
-	// The blocked HTTP request and source both return cancellation errors.
-	if !errors.Is(e, context.Canceled) || strings.Count(e.Error(), context.Canceled.Error()) < 2 {
-		t.Errorf("errors not joined: %v", e)
-	}
-	if v := c.Load(); v.State != observability.Stopping || v.Ready {
-		t.Error("collector not marked stopping")
-	}
-	_, stopping := s.LiveStatus()
-	if !stopping {
-		t.Error("transport close skipped")
+	err := closeServices(ctx, core, host.Config)
+	if !core.called || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "core shutdown failed") {
+		t.Fatalf("shutdown results not joined: %v", err)
 	}
 	select {
 	case <-called:
 	case <-time.After(time.Second):
-		t.Error("HTTP shutdown skipped after earlier error")
-	}
-	generation := c.Load().Generation
-	close(release)
-	released = true
-	time.Sleep(20 * time.Millisecond)
-	if c.Load().Generation != generation {
-		t.Error("collector close skipped or late source republished")
+		t.Fatal("HTTP shutdown skipped")
 	}
 }
-func TestCloseServicesNilCollector(t *testing.T) {
-	_, s := services(t)
-	called := make(chan struct{})
-	h := &http.Server{}
-	h.RegisterOnShutdown(func() { close(called) })
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if e := closeServices(ctx, s, h, nil); e != nil {
-		t.Fatal(e)
+func TestCloseServicesPublicCore(t *testing.T) {
+	core, err := coopdock.New(coopdock.DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, stopping := s.LiveStatus()
-	if !stopping {
-		t.Error("transport not stopped")
+	defer core.Shutdown(context.Background())
+	h := &http.Server{}
+	called := make(chan struct{})
+	h.RegisterOnShutdown(func() { close(called) })
+	if err := closeServices(context.Background(), core, h); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	core.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/readyz", nil))
+	if w.Code != 503 {
+		t.Fatal("core not stopped")
 	}
 	select {
 	case <-called:
 	case <-time.After(time.Second):
-		t.Error("HTTP shutdown skipped")
+		t.Fatal("HTTP shutdown skipped")
 	}
 }
 

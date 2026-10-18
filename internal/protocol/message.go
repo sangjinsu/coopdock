@@ -7,7 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"strconv"
 	"unicode/utf8"
 )

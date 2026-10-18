@@ -2,7 +2,7 @@ package admin
 
 import (
 	"reflect"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"testing"
 	"time"
 )

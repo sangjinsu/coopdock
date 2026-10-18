@@ -3,26 +3,25 @@ package config
 
 import (
 	"fmt"
+	"github.com/sangjinsu/coopdock"
+	"github.com/sangjinsu/coopdock/internal/admin"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"net"
 	"os"
-	"roomserver/internal/admin"
-	"roomserver/internal/room"
-	"roomserver/internal/transport"
 	"strconv"
 	"strings"
 	"time"
 )
 
 type Config struct {
-	Admin     admin.Config
-	Address   string
-	Room      room.Config
-	Transport transport.Config
+	coopdock.Config
+	Address string
 }
 
 func Load() (Config, error) {
-	c := Config{Admin: admin.Config{ViewerToken: os.Getenv("ADMIN_VIEWER_TOKEN")}, Address: "127.0.0.1:8080", Room: room.DefaultConfig(), Transport: transport.DefaultConfig()}
-	if e := c.Admin.Validate(); e != nil {
+	c := Config{Config: coopdock.DefaultConfig(), Address: "127.0.0.1:8080"}
+	c.Admin.ViewerToken = os.Getenv("ADMIN_VIEWER_TOKEN")
+	if e := (admin.Config{ViewerToken: c.Admin.ViewerToken}).Validate(); e != nil {
 		return c, e
 	}
 	if raw, ok := os.LookupEnv("GAME_IDS"); ok {
@@ -115,7 +114,7 @@ func Load() (Config, error) {
 			c.Transport.Origins = append(c.Transport.Origins, s)
 		}
 	}
-	if e := c.Transport.Validate(); e != nil {
+	if e := c.Config.Validate(); e != nil {
 		return c, e
 	}
 	return c, nil

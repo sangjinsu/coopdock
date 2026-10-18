@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"github.com/coder/websocket"
 	"reflect"
-	"roomserver/internal/game"
-	"roomserver/internal/protocol"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/game"
+	"github.com/sangjinsu/coopdock/internal/protocol"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"sync"
 	"time"
 )

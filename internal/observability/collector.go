@@ -5,7 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"runtime"
 	"sort"
 	"sync"
@@ -85,6 +85,16 @@ type Collector struct {
 }
 
 func New(startupCtx context.Context, source Source, cfg Config) (*Collector, error) {
+	c, err := NewOwned(startupCtx, source, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// NewOwned transfers cleanup ownership even when startup fails after workers start.
+// On any non-nil collector, the caller must call Close and wait for its completion.
+func NewOwned(startupCtx context.Context, source Source, cfg Config) (*Collector, error) {
 	if source.Rooms == nil || source.Transport == nil || cfg.Interval <= 0 {
 		return nil, errors.New("Invalid observability configuration.")
 	}
@@ -116,11 +126,11 @@ func New(startupCtx context.Context, source Source, cfg Config) (*Collector, err
 	select {
 	case <-startupCtx.Done():
 		c.requestCancel()
-		return nil, startupCtx.Err()
+		return c, startupCtx.Err()
 	case <-cacheReady:
 		if err := startupCtx.Err(); err != nil {
 			c.requestCancel()
-			return nil, err
+			return c, err
 		}
 		return c, nil
 	}

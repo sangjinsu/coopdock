@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"net/http/httptest"
-	"roomserver/internal/game"
-	"roomserver/internal/room"
-	"roomserver/internal/transport"
+	"github.com/sangjinsu/coopdock/internal/game"
+	"github.com/sangjinsu/coopdock/internal/room"
+	"github.com/sangjinsu/coopdock/internal/transport"
 	"strings"
 	"testing"
 	"time"

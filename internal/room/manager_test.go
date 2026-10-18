@@ -360,11 +360,13 @@ func TestEventOverflowCleansActorWithoutDeadlock(t *testing.T) {
 		t.Fatal(e)
 	}
 	await(t, h.Done())
-	ls, e := listForTest(t, m, context.Background())
+	await(t, s.Done())
+	observer := connect(t, m, "overflow-observer")
+	defer m.Disconnect(observer)
+	ls, e := m.ListPublic(context.Background(), observer)
 	if e != nil || len(ls) != 0 {
 		t.Fatal(ls, e)
 	}
-	await(t, s.Done())
 }
 func TestForeignSessionAndResourceBounds(t *testing.T) {
 	c := DefaultConfig()

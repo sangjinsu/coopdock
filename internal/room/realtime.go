@@ -3,7 +3,7 @@ package room
 import (
 	"context"
 	"crypto/rand"
-	"roomserver/internal/game"
+	"github.com/sangjinsu/coopdock/internal/game"
 	"time"
 )
 

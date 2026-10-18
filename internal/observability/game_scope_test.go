@@ -2,7 +2,7 @@ package observability
 
 import (
 	"context"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"testing"
 	"time"
 )

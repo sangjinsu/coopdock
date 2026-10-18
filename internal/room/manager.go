@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
-	"roomserver/internal/game"
+	"github.com/sangjinsu/coopdock/internal/game"
 	"sort"
 	"sync"
 	"time"

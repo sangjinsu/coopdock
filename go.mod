@@ -1,4 +1,4 @@
-module roomserver
+module github.com/sangjinsu/coopdock
 
 go 1.26.0
 

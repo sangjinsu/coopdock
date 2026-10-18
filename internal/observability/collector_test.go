@@ -3,7 +3,7 @@ package observability
 import (
 	"context"
 	"errors"
-	"roomserver/internal/room"
+	"github.com/sangjinsu/coopdock/internal/room"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -371,5 +371,63 @@ func TestCollectorRoomReadiness(t *testing.T) {
 	defer c.Close(context.Background())
 	if c.Load().Ready {
 		t.Fatal("unready room source reported ready")
+	}
+}
+
+// An owned constructor must return the cleanup handle even after startup fails.
+func TestOwnedCollectorStartupFailureCleanup(t *testing.T) {
+	for _, blocked := range []string{"rooms", "runtime"} {
+		t.Run(blocked, func(t *testing.T) {
+			clock := newManualClock()
+			cfg := clock.config()
+			entered, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			defer once.Do(func() { close(release) })
+			cfg.sampleRuntime = func() (uint64, int) {
+				if blocked == "runtime" {
+					close(entered)
+					<-release
+				}
+				return 1, 1
+			}
+			source := Source{Rooms: func() room.OperationsSnapshot {
+				if blocked == "rooms" {
+					close(entered)
+					<-release
+				}
+				return room.OperationsSnapshot{Ready: true}
+			}, Transport: func() (int, bool) { return 0, false }}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			type result struct {
+				c   *Collector
+				err error
+			}
+			results := make(chan result, 1)
+			go func() { c, err := NewOwned(ctx, source, cfg); results <- result{c, err} }()
+			awaitSignal(t, entered)
+			cancel()
+			var r result
+			select {
+			case r = <-results:
+			case <-time.After(time.Second):
+				t.Fatal("startup cancellation blocked")
+			}
+			if r.c == nil || !errors.Is(r.err, context.Canceled) {
+				t.Fatalf("owned startup lost cleanup handle: collector=%v error=%v", r.c, r.err)
+			}
+			if err := r.c.Close(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatalf("blocked worker reported cleanup: %v", err)
+			}
+			once.Do(func() { close(release) })
+			if err := r.c.Close(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			awaitSignal(t, clock.sourceStopped)
+			awaitSignal(t, clock.runtimeStopped)
+			if r.c.Load().Generation != 0 {
+				t.Fatal("canceled startup published cache")
+			}
+		})
 	}
 }

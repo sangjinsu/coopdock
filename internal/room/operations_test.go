@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"roomserver/internal/game"
+	"github.com/sangjinsu/coopdock/internal/game"
 )
 
 func awaitOperations(t *testing.T, m *Manager, matches func(OperationsSnapshot) bool) OperationsSnapshot {
