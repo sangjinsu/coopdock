@@ -1,0 +1,21 @@
+services:
+  coopdock:
+    build:
+      context: .
+    image: coopdock:local
+    ports:
+      - "${COOPDOCK_BIND_IP:-127.0.0.1}:${COOPDOCK_PORT:-8080}:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HTTP_ADDR: "0.0.0.0:8080"
+      GAME_IDS: "${GAME_IDS:-default}"
+      ADMIN_VIEWER_TOKEN: "${ADMIN_VIEWER_TOKEN:-}"
+    stop_grace_period: 30s
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

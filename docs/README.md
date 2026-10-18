@@ -11,6 +11,7 @@
 | 문서 | 내용 |
 |---|---|
 | [빠른 시작](getting-started.md) | Go 준비, 서버 실행, 상태 확인, 실제 6개 연결 CLI 검사 |
+| [Docker로 실행](docker.md) | Docker 준비, Compose 실행, 포트·게임 ID 설정과 종료 |
 | [Go embedding 가이드](go-embedding.md) | public import, 기존 HTTP route 공존, 설정·admin·종료 |
 | [서버 사용·운영 가이드](server-guide.md) | 현재 룸·이동 계약, WebSocket JSON, 오류 코드, 모든 환경변수, 종료와 검증 |
 | [현재 서버 구조](architecture.md) | 게임 처리와 cache 기반 운영 조회의 내부 경로 |

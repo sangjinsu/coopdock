@@ -8,7 +8,7 @@ CoopDock은 **1~6인 룸형 협동 게임을 위한 Go 서버 프로젝트**입�
 6자리 룸 번호로 모여 서버가 계산한 상태를 공유합니다.
 룸 입장부터 실시간 이동, Godot 게임 화면과 운영 조회까지 한 저장소에서 시작하세요.
 
-[빠른 시작](docs/getting-started.md) · [Godot 3D/2D 예제](examples/godot/README.md) · [서버 사용·운영 가이드](docs/server-guide.md) · [v0.1.0 릴리스](https://github.com/sangjinsu/coopdock/releases/tag/v0.1.0)
+[빠른 시작](docs/getting-started.md) · [Docker로 실행](docs/docker.md) · [Godot 3D/2D 예제](examples/godot/README.md) · [서버 사용·운영 가이드](docs/server-guide.md) · [v0.1.0 릴리스](https://github.com/sangjinsu/coopdock/releases/tag/v0.1.0)
 
 ## 작은 협동 게임을 위한 출발점
 
@@ -78,6 +78,7 @@ host가 listener를 열고, 종료 시 `service.Shutdown(ctx)`와 `host.Shutdown
 | 문서 | 찾을 수 있는 내용 |
 |---|---|
 | [빠른 시작](docs/getting-started.md) | 준비부터 로컬 실행과 연결 검사까지 |
+| [Docker로 실행](docs/docker.md) | Compose 실행, 포트·게임 ID 설정, 로그와 종료 |
 | [Godot 3D/2D 예제](examples/godot/README.md) | 두 창 실행, 룸 입장, 이동 조작과 표시 |
 | [서버 사용·운영 가이드](docs/server-guide.md) | 현재 동작, 메시지 예제, 설정과 검증 |
 | [대시보드 켜기](docs/server-guide.md#운영-대시보드-켜기) | 운영 인증 설정과 조회 화면 |

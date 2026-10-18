@@ -9,3 +9,6 @@ work/
 /go-mod/
 /tmp/
 examples/godot/.godot/
+.env
+.env.*
+!.env.example
