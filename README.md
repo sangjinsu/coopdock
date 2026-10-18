@@ -41,16 +41,10 @@ go run ./cmd/server
 
 ## Go 패키지로 사용하기
 
-다른 Go 프로젝트의 module 루트에서 설치하세요. 새 module이라면 먼저 `go mod init example.com/my-game-server`를 실행합니다.
+릴리스 **v0.1.0**을 다른 Go 프로젝트의 module 루트에서 설치하세요. 새 module이라면 먼저 `go mod init example.com/my-game-server`를 실행합니다.
 
 ```bash
-go get github.com/sangjinsu/coopdock
-```
-
-Go 공개 proxy의 이전 module cache 때문에 `module declares its path as: roomserver` 오류가 나면 다음 명령으로 저장소에서 직접 설치하세요.
-
-```bash
-GOPROXY=direct go get github.com/sangjinsu/coopdock
+go get github.com/sangjinsu/coopdock@v0.1.0
 ```
 
 다음은 **기존 host의 초기화에 넣는 함수**입니다. CoopDock을 host의 최상위 Handler로 연결하고, 종료할 때 사용할 instance를 반환합니다.

@@ -6,19 +6,11 @@ CoopDock을 `github.com/sangjinsu/coopdock`으로 import해 기존 HTTP 서버 �
 
 ## 설치와 실행
 
-Go **1.26 이상**이 필요합니다. 외부 application의 module 루트에서 설치합니다. 새 module이라면 먼저 `go mod init example.com/my-game-server`를 실행하세요.
+Go **1.26 이상**이 필요합니다. 외부 application의 module 루트에서 릴리스 **v0.1.0**을 설치합니다. 새 module이라면 먼저 `go mod init example.com/my-game-server`를 실행하세요.
 
 ```bash
-go get github.com/sangjinsu/coopdock
+go get github.com/sangjinsu/coopdock@v0.1.0
 ```
-
-Go 공개 proxy의 이전 module cache 때문에 `module declares its path as: roomserver` 오류가 나면 다음 명령으로 저장소에서 직접 설치하세요.
-
-```bash
-GOPROXY=direct go get github.com/sangjinsu/coopdock
-```
-
-기본 명령은 Go module mirror를 이용합니다. `GOPROXY=direct`는 mirror를 건너뛰고 같은 module의 저장소에서 version을 조회하며, 적절한 tag가 없는 새 설치에서는 default branch의 revision을 선택합니다. 이 설정은 위 명령에만 적용되어 Go 설정을 영구 변경하지 않습니다. mirror의 cache와 직접 조회 설정은 [Go Module Mirror 공식 FAQ](https://proxy.golang.org/)에서 확인할 수 있습니다.
 
 선택한 version은 `go.mod`에 기록됩니다. 이후 업데이트할 때는 다음을 명시적으로 실행합니다.
 
@@ -26,7 +18,7 @@ GOPROXY=direct go get github.com/sangjinsu/coopdock
 go get github.com/sangjinsu/coopdock@latest
 ```
 
-`@latest`는 version tag를 우선 선택하고, 적절한 tag가 없으면 default branch의 최신 revision을 사용합니다. 특정 revision을 재현해야 한다면 `@<commit SHA>` 또는 resolved pseudo-version을 지정할 수도 있습니다. 내려받은 version은 `go list -m -json github.com/sangjinsu/coopdock`과 `go mod download -json github.com/sangjinsu/coopdock`에서 확인합니다. local `replace`는 개발 중에만 사용하세요.
+`@latest`는 사용 가능한 최신 release tag를 우선 선택합니다. 재현 가능한 설치에는 위 `@v0.1.0`처럼 version을 명시하세요. 특정 revision이 필요하다면 `@<commit SHA>` 또는 resolved pseudo-version을 지정할 수도 있습니다. 내려받은 version은 `go list -m -json github.com/sangjinsu/coopdock`과 `go mod download -json github.com/sangjinsu/coopdock`에서 확인합니다. local `replace`는 개발 중에만 사용하세요.
 
 전체 실행 예제를 받으려면 저장소를 clone합니다.
 
@@ -122,6 +114,10 @@ non-nil context를 전달합니다. `http.Server.Shutdown`은 hijacked WebSocket
 `service.Shutdown`은 최초 호출에서 신규 수용을 동기적으로 닫고 기존 WS·룸·worker·collector 정리를 시작합니다. 이미 취소된 context도 종료를 시작합니다. 모든 정리가 끝나야 nil을 반환합니다. caller deadline이나 `Transport.ShutdownTimeout`으로 먼저 반환하면 `errors.Is`로 context 오류를 확인할 수 있으며 background 정리는 계속됩니다. 실행 중 Argon 계산은 즉시 취소되지 않습니다. 정리 완료가 필요한 장기 host는 새 context로 `Shutdown`을 다시 호출하고 기다리세요. 이 예제의 process는 종료 오류 후 계속 기다리는 supervisor를 구현하지 않으므로 supervisor의 grace를 별도로 설계해야 합니다.
 
 여러 caller가 각각의 context로 동시에 기다릴 수 있고, 완료 후 재호출은 취소된 context여도 nil입니다. 완료한 instance는 재시작하지 않습니다. core만 종료한 뒤에는 `/healthz`200, `/readyz`503, 유효 WS 요청503이 유지되며 잘못된 game query의 400/404 검증은 계속 적용됩니다. admin은 비활성404 또는 인증 후 cached STOPPING 상태입니다. 최종 counter가 반드시 0이라는 보장은 없습니다.
+
+## 설치 문제 확인하기
+
+Go module mirror의 cache 때문에 새 version이 즉시 보이지 않을 수 있습니다. 설치 오류가 나면 요청한 version과 오류 메시지를 확인하고 [Go Module Mirror 공식 FAQ](https://proxy.golang.org/)를 참조하세요.
 
 ## 확인한 범위
 
