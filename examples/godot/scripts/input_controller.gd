@@ -31,7 +31,7 @@ func _on_snapshot(snapshot: Dictionary) -> void:
 		_identity = identity
 
 func _process(_delta: float) -> void:
-	submit_direction(_movement.sample(_focused, _text_focused))
+	submit_direction(_movement.sample(_focused, _text_focused, view_mode == "3d"))
 
 func submit_direction(direction: Vector3) -> void:
 	if _client == null or _client.state.current_snapshot.get("phase") != "PLAYING":
@@ -42,6 +42,8 @@ func submit_direction(direction: Vector3) -> void:
 			_last_sent_direction = Vector3.ZERO
 			_pending_stop = false
 		return
+	if view_mode == "2d":
+		direction.y = 0.0
 	if not _focused or _text_focused:
 		direction = Vector3.ZERO
 	if direction == _last_sent_direction:
@@ -63,8 +65,9 @@ func set_input_gate(focused: bool, text_input_focused: bool) -> void:
 		submit_direction(Vector3.ZERO)
 
 func set_view_mode(mode: String) -> void:
-	if mode != "3d":
+	if mode not in ["3d", "2d"] or mode == view_mode:
 		return
 	_movement.release_actions()
+	_pending_stop = true
 	submit_direction(Vector3.ZERO)
 	view_mode = mode

@@ -30,6 +30,10 @@ func _run() -> void:
 	await test_direction_retry()
 	await test_world_lifecycle()
 	test_same_capture()
+	await test_2d_projection_and_lifecycle()
+	await test_mode_preserves_session()
+	await test_main_mode_timelines()
+	await test_hud_long_game_ids()
 	print("unit checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
 
@@ -497,3 +501,126 @@ func test_same_capture() -> void:
 	b = a.duplicate(true)
 	b.snapshot_seq += 1
 	check(not TestDriver.same_capture([a, b]), "different capture identity cannot pass")
+
+func test_2d_projection_and_lifecycle() -> void:
+	check(GameWorld2D.project_position(Vector3(3, 20, -4)) == Vector2(3, -4), "2D projects XZ without Y")
+	var movement := MovementInput.new()
+	var key := InputEventKey.new()
+	key.physical_keycode = KEY_E
+	key.pressed = true
+	Input.parse_input_event(key)
+	await process_frame
+	check(movement.sample(true, false, false) == Vector3.ZERO, "2D physical E disabled")
+	check(movement.sample(true, false, true) == Vector3.UP, "3D physical E retained")
+	movement.release_actions()
+	key.pressed = false
+	Input.parse_input_event(key)
+	var client := Support.ready_client(true)
+	var snapshot := Support.snapshot("rA", "mA")
+	snapshot.game_state.players[0].position = {"x": 3, "y": 20, "z": -4}
+	var world := GameWorld2D.new()
+	root.add_child(world)
+	world.set_process(false)
+	world.bind_client(client)
+	world.reset_timeline(snapshot, 1000)
+	check(world.positions.get("sA") == Vector2(3, -4) and world.pixel_scale == 32, "2D authoritative position at 32 pixels per unit")
+	check(world.buffer.sample_positions(1000).get("sA") == Vector3(3, 20, -4), "2D buffer preserves server Y")
+	var next := snapshot.duplicate(true)
+	next.snapshot_seq = 2
+	next.game_state.players[0].position.x = 7
+	world.buffer.push_snapshot(next, 1100)
+	world._sample(1200)
+	check(world.positions.get("sA") == Vector2(7, -4), "2D interpolation reaches authoritative endpoint")
+	client.snapshot_changed.emit(Support.snapshot("rA", "mA", 2, 3, ["sA", "sB"]))
+	check(world.positions.has("sB"), "2D new peer immediate")
+	client.snapshot_changed.emit(Support.snapshot("rA", "mA", 3, 3, ["sA"]))
+	check(not world.positions.has("sB"), "2D metadata removal immediate")
+	client.snapshot_changed.emit(Support.snapshot())
+	check(world.positions.is_empty() and world.buffer.sample_positions(9999).is_empty(), "2D WAITING clears renderer and timeline")
+	check(client.sent.is_empty(), "2D renderer never sends input")
+	world.queue_free()
+	client.free()
+	await process_frame
+
+func test_mode_preserves_session() -> void:
+	var client := Support.ready_client(true)
+	var controller := InputController.new()
+	root.add_child(controller)
+	controller.set_process(false)
+	controller.bind_client(client)
+	controller.submit_direction(Vector3.FORWARD)
+	var next_before := client.next_input_seq
+	client.send_error = ERR_BUSY
+	controller.set_view_mode("2d")
+	check(controller.view_mode == "2d", "2D mode accepted")
+	check(controller._pending_stop, "failed mode stop remains pending")
+	client.send_error = OK
+	controller.submit_direction(Vector3.RIGHT)
+	check(JSON.parse_string(client.sent.back()).payload.action.direction == {"x": 0.0, "y": 0.0, "z": 0.0}, "failed mode stop retries before movement")
+	check(client.state.session_id == "sA" and client.state.game_id == "default" and client.state.current_snapshot.room_id == "rA", "mode preserves game room session")
+	check(client.next_input_seq > next_before, "mode keeps monotonic input sequence")
+	controller.submit_direction(Vector3.UP)
+	check(controller._last_sent_direction.y == 0, "2D controller rejects vertical direction")
+	controller.submit_direction(Vector3.RIGHT)
+	var sent_before := client.sent.size()
+	controller.submit_direction(Vector3.RIGHT)
+	check(client.sent.size() == sent_before, "2D successful direction deduplicates")
+	controller.set_view_mode("invalid")
+	check(controller.view_mode == "2d", "invalid mode ignored")
+	controller.set_view_mode("3d")
+	check(controller.view_mode == "3d" and controller._last_sent_direction == Vector3.ZERO, "3D switch stops before resuming")
+	controller.queue_free()
+	client.free()
+	await process_frame
+
+func test_main_mode_timelines() -> void:
+	var main := Main.new()
+	root.add_child(main)
+	main.set_process(false)
+	main.controller.set_process(false)
+	main.client.state.new_connection(1)
+	main.client.state.accept_guest("sA", "default")
+	var snapshot := Support.snapshot("rA", "mA")
+	snapshot.game_state.players[0].position = {"x": 3, "y": 20, "z": -4}
+	main.client.state.apply_admission(snapshot, main.client.state.begin_admission())
+	main.client.snapshot_changed.emit(main.client.state.current_snapshot)
+	main.view_select.item_selected.emit(1)
+	check(main.controller.view_mode == "2d" and not main.world.visible and main.world_2d.visible, "selector activates only 2D renderer")
+	check(main.world.buffer._latest_received_ms == main.world_2d.buffer._latest_received_ms, "mode resets both timelines with same clock")
+	check(main.world.avatars.sA.position == Vector3(3, 20, -4) and main.world_2d.positions.sA == Vector2(3, -4), "same accepted snapshot feeds 3D and 2D projection")
+	check(main.client.state.current_snapshot.game_state.players[0].position.y == 20, "mode switch never mutates authoritative Y")
+	var controller_count := 0
+	for child: Node in main.get_children():
+		if child is InputController:
+			controller_count += 1
+	check(controller_count == 1, "both modes share a single input controller")
+	main._set_view_mode("3d")
+	check(main.world.visible and not main.world_2d.visible and main.view_select.selected == 0, "3D mode restores visibility and selector")
+	main.queue_free()
+	await process_frame
+
+func test_hud_long_game_ids() -> void:
+	var original_size := root.size
+	var main := Main.new()
+	root.add_child(main)
+	main.set_process(false)
+	main.controller.set_process(false)
+	for width: int in [1100, 700]:
+		root.size = Vector2i(width, 720)
+		for length: int in [7, 48, 64]:
+			var game_id := "w".repeat(length)
+			main.client.state.game_id = game_id
+			main._on_snapshot({"phase": "PLAYING", "room_number": "123456", "members": [1, 2, 3, 4, 5, 6]})
+			for mode: String in ["3d", "2d"]:
+				main._set_view_mode(mode)
+				for frame: int in range(4):
+					await process_frame
+				var context := "%dpx physical %d-char game ID %s" % [width, length, mode]
+				check(WireCodec.valid_game_id(game_id), "HUD fixture valid " + context)
+				check(main.client.state.game_id == game_id and game_id in main._summary.tooltip_text, "HUD preserves full game ID in state and tooltip " + context)
+				for item: Control in main.view_select.get_parent().get_children():
+					var rect := item.get_global_rect()
+					check(rect.position.x >= 0 and rect.end.x <= root.get_visible_rect().size.x + 0.5, "HUD control remains inside viewport " + item.get_class() + " " + context)
+	main.queue_free()
+	root.size = original_size
+	await process_frame

@@ -6,7 +6,8 @@ export GODOT_BIN="${GODOT_BIN:-/Applications/Godot.app/Contents/MacOS/Godot}"
 python3 - "$@" <<'PY'
 import json, os, pathlib, socket, subprocess, sys, time, urllib.request
 root = pathlib.Path.cwd()
-out = root / 'work/godot-client/task-3'
+out = pathlib.Path(os.environ.get('GODOT_CHECKS_OUTPUT_DIR', str(root / 'work/godot-client/task-4')))
+if not out.is_absolute(): out = root / out
 out.mkdir(parents=True, exist_ok=True)
 env = os.environ.copy()
 for key in list(env):
@@ -15,7 +16,8 @@ for key in list(env):
 env.update(GAME_IDS='default', GOCACHE=str(root/'work/go-build'), GOMODCACHE=str(root/'work/go-mod'), GOTMPDIR=str(root/'work/tmp'), GOTOOLCHAIN='local')
 (root/'work/tmp').mkdir(parents=True, exist_ok=True)
 godot = env['GODOT_BIN']
-mode = 'native' if '--native' in sys.argv else 'checks'
+mixed = '--mixed-native' in sys.argv
+mode = 'mixed-native' if mixed else ('native' if '--native' in sys.argv else 'checks')
 metadata = {'mode':mode, 'GAME_IDS':'default', 'children':[], 'commands':[]}
 owned = []
 streams = []
@@ -74,26 +76,33 @@ try:
         proc,url=server('native')
         room=out/('native-room-'+str(os.getpid())+'.json')
         native=[]
-        for role,position in [('host','40,80'),('peer','620,120')]:
+        roles = [('host','40,80'),('peer','620,120')]
+        if mixed: roles += [('seed'+str(i),'0,0') for i in range(4)]
+        for role,position in roles:
             prefix=out/('native-'+role)
             cmd=[godot,'--path','examples/godot','--rendering-method','gl_compatibility','--windowed','--resolution','1100x720','--position',position,'--script','res://tests/run_render_qa.gd','--','--url',url,'--mode',role,'--room-file',str(room),'--output-prefix',str(prefix)]
+            if mixed:
+                cmd += ['--mixed']
+                if role.startswith('seed'): cmd.insert(1, '--headless')
             stream=(out/('native-'+role+'.log')).open('w');streams.append(stream)
             child=subprocess.Popen(cmd,env=env,stdout=stream,stderr=subprocess.STDOUT)
             owned.append(child); native.append((role,child,cmd))
             metadata['children'].append({'pid':child.pid,'kind':'native-'+role})
-        deadline=time.monotonic()+65
+        deadline=time.monotonic()+(90 if mixed else 65)
         for role,child,cmd in native:
             code=child.wait(timeout=max(1,deadline-time.monotonic()))
             metadata['commands'].append({'argv':cmd,'exit':code})
             text=(out/('native-'+role+'.log')).read_text()
             print(role,'exit',code,text[-2000:],flush=True)
             if code or 'SCRIPT ERROR:' in text or '\nERROR:' in text: raise RuntimeError('native '+role+' failed')
-        host=json.loads((out/'native-host-captures.json').read_text());peer=json.loads((out/'native-peer-captures.json').read_text())
-        common=set(host)&set(peer)
+        captures=[json.loads((out/('native-'+role+'-captures.json')).read_text()) for role,_ in roles]
+        common=set.intersection(*(set(c) for c in captures))
         assert common, 'native no common capture'
-        assert all(host[k]==peer[k] for k in common), 'native full common capture mismatch'
+        assert all(all(c[k]==captures[0][k] for c in captures) for k in common), 'native full common capture mismatch'
         metadata['native_common_full_captures']=len(common)
-        for role in ['host','peer']:
+        metadata['native_window_count']=2
+        metadata['socket_count']=len(roles)
+        for role,_ in roles:
             report=json.loads((out/('native-'+role+'-report.json')).read_text())
             assert report['failures']==0
         stop(proc)

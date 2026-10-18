@@ -4,6 +4,9 @@ class_name Main
 var client: CoopClient
 var lobby: LobbyPanel
 var world: GameWorld
+var world_2d: GameWorld2D
+var view_select: OptionButton
+var _hint: Label
 var controller: InputController
 var _summary: Label
 var _lobby_toggle: Button
@@ -17,6 +20,10 @@ func _ready() -> void:
 	world = GameWorld.new()
 	add_child(world)
 	world.bind_client(client)
+	world_2d = GameWorld2D.new()
+	add_child(world_2d)
+	world_2d.bind_client(client)
+	world_2d.visible = false
 	controller = InputController.new()
 	add_child(controller)
 	controller.bind_client(client)
@@ -39,7 +46,14 @@ func _ready() -> void:
 	panel.add_child(bar)
 	_summary = Label.new()
 	_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_summary.clip_text = true
+	_summary.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	bar.add_child(_summary)
+	view_select = OptionButton.new()
+	view_select.add_item("3D 공간")
+	view_select.add_item("2D XZ 평면")
+	view_select.item_selected.connect(func(index: int): _set_view_mode("3d" if index == 0 else "2d"))
+	bar.add_child(view_select)
 	_lobby_toggle = Button.new()
 	_lobby_toggle.text = "로비 열기"
 	_lobby_toggle.pressed.connect(func():
@@ -52,9 +66,9 @@ func _ready() -> void:
 		controller.submit_direction(Vector3.ZERO)
 		client.leave_room())
 	bar.add_child(leave)
-	var hint := Label.new()
-	hint.text = "WASD / 방향키 이동 · Q/E 높이 · 청록색: 나 · 주황색: 참가자 · 서버 snapshot 위치"
-	page.add_child(hint)
+	_hint = Label.new()
+	_hint.text = "WASD / 방향키 이동 · Q/E 높이 · 청록색: 나 · 주황색: 참가자 · 서버 snapshot 위치"
+	page.add_child(_hint)
 	lobby = LobbyPanel.new()
 	lobby.name = "Lobby"
 	lobby.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -76,6 +90,7 @@ func _process(_delta: float) -> void:
 func _on_snapshot(snapshot: Dictionary) -> void:
 	_playing = snapshot.get("phase") == "PLAYING"
 	_summary.text = "CoopDock · 게임 %s · 방 %s · %s · %d명" % [client.state.game_id, snapshot.get("room_number", "—"), snapshot.get("phase", client.status), snapshot.get("members", []).size()]
+	_summary.tooltip_text = _summary.text
 	_update_lobby()
 
 func _update_lobby() -> void:
@@ -84,6 +99,13 @@ func _update_lobby() -> void:
 	_lobby_toggle.text = "로비 접기" if _expanded else "로비 열기"
 
 func _set_view_mode(mode: String) -> void:
-	if mode == "3d":
-		controller.set_view_mode(mode)
-		world.reset_timeline(client.state.current_snapshot, Time.get_ticks_msec())
+	if mode not in ["3d", "2d"] or mode == controller.view_mode:
+		return
+	controller.set_view_mode(mode)
+	var received_ms := Time.get_ticks_msec()
+	world.reset_timeline(client.state.current_snapshot, received_ms)
+	world_2d.reset_timeline(client.state.current_snapshot, received_ms)
+	world.visible = mode == "3d"
+	world_2d.visible = mode == "2d"
+	view_select.select(0 if mode == "3d" else 1)
+	_hint.text = "WASD / 방향키 이동 · %s · 청록색: 나 · 주황색: 참가자 · 서버 snapshot 위치" % ("Q/E 높이" if mode == "3d" else "XZ 평면 · 32px/unit · Q/E 비활성")
