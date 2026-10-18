@@ -39,7 +39,35 @@ go run ./cmd/server
 [Godot 예제](examples/godot/README.md)를 두 창으로 열어 같은 게임 ID와 룸에 접속하고, 방장이 게임을 시작하면 함께 움직일 수 있습니다.
 서버만 먼저 확인하려면 [빠른 시작의 6개 WebSocket 연결 검사](docs/getting-started.md#4-여섯-연결로-검사하기)를 실행하세요.
 
-기존 Go HTTP 서버에 룸 기능을 넣으려면 [Go embedding 예제와 가이드](docs/go-embedding.md)를 사용하세요.
+## Go 패키지로 사용하기
+
+다른 Go 프로젝트의 module 루트에서 설치하세요. 새 module이라면 먼저 `go mod init example.com/my-game-server`를 실행합니다.
+
+```bash
+go get github.com/sangjinsu/coopdock
+```
+
+다음은 **기존 host의 초기화에 넣는 함수**입니다. CoopDock을 host의 최상위 Handler로 연결하고, 종료할 때 사용할 instance를 반환합니다.
+
+```go
+import (
+    "net/http"
+
+    "github.com/sangjinsu/coopdock"
+)
+
+func configureCoopDock(host *http.Server) (*coopdock.Server, error) {
+    service, err := coopdock.New(coopdock.DefaultConfig())
+    if err != nil {
+        return nil, err
+    }
+    host.Handler = service.Handler()
+    return service, nil
+}
+```
+
+host가 listener를 열고, 종료 시 `service.Shutdown(ctx)`와 `host.Shutdown(ctx)`를 모두 호출해 결과를 기다려야 합니다.
+[전체 실행 예제](examples/go-embed/main.go)에서 listener·signal·종료 처리를, [Go embedding 가이드](docs/go-embedding.md)에서 기존 route와의 공존·설정·업데이트를 확인하세요.
 
 현재는 **자유 공간 이동을 제공하는 초기 reference 구현**입니다.
 게임별 지형·충돌·승패 규칙은 후속 범위이며, `game_id`는 게임별 룸을 구분하는 공개 namespace입니다.

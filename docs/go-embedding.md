@@ -6,24 +6,24 @@ CoopDock을 `github.com/sangjinsu/coopdock`으로 import해 기존 HTTP 서버 �
 
 ## 설치와 실행
 
-Go **1.26 이상**이 필요합니다. 공개 package는 현재 feature branch에 있으므로 외부 application의 Go module 안에서 검증한 commit을 고정합니다.
+Go **1.26 이상**이 필요합니다. 외부 application의 module 루트에서 설치합니다. 새 module이라면 먼저 `go mod init example.com/my-game-server`를 실행하세요.
 
 ```bash
-go get github.com/sangjinsu/coopdock@2b3c6f8d7e35e9f83a1b7173cde788ac52ca442e
+go get github.com/sangjinsu/coopdock
 ```
 
-같은 revision의 resolved pseudo-version도 사용할 수 있습니다.
+선택한 version은 `go.mod`에 기록됩니다. 이후 업데이트할 때는 다음을 명시적으로 실행합니다.
 
 ```bash
-go get github.com/sangjinsu/coopdock@v0.0.0-20261018115756-2b3c6f8d7e35
+go get github.com/sangjinsu/coopdock@latest
 ```
 
-위 SHA는 공개 core가 들어 있는 commit입니다. `main`이나 `@latest`가 이 API를 제공한다고 가정하지 마세요. 내려받은 revision은 `go list -m -json github.com/sangjinsu/coopdock`과 `go mod download -json github.com/sangjinsu/coopdock`에서 확인할 수 있습니다. local `replace`는 개발 중에만 사용하고 배포할 application의 module에서는 실제 revision으로 고정하세요.
+`@latest`는 version tag를 우선 선택하고, 적절한 tag가 없으면 default branch의 최신 revision을 사용합니다. 특정 revision을 재현해야 한다면 `@<commit SHA>` 또는 resolved pseudo-version을 지정할 수도 있습니다. 내려받은 version은 `go list -m -json github.com/sangjinsu/coopdock`과 `go mod download -json github.com/sangjinsu/coopdock`에서 확인합니다. local `replace`는 개발 중에만 사용하세요.
 
-`@codex/godot-client-example` query는 Go가 `invalid version: disallowed version string`으로 거절하므로 설치 명령으로 사용하지 않습니다. 예제를 포함한 feature branch checkout이 필요하면 Git에서 branch를 선택합니다.
+전체 실행 예제를 받으려면 저장소를 clone합니다.
 
 ```bash
-git clone --branch codex/godot-client-example https://github.com/sangjinsu/coopdock.git
+git clone https://github.com/sangjinsu/coopdock.git
 cd coopdock
 ```
 
@@ -117,6 +117,6 @@ non-nil context를 전달합니다. `http.Server.Shutdown`은 hijacked WebSocket
 
 ## 확인한 범위
 
-외부 독립 Go module에서 public import와 prefix route, 두 instance·두 game의 실제 WS 생성·목록·private 입장·시작·서버 권위 이동·퇴장, 한 instance 종료 뒤 host와 다른 instance 생존을 검증했습니다. local replace와 별도로 위 pushed SHA를 실제 no-replace module로 내려받아 같은 검사를 실행했습니다. direct revision 조회의 `Origin.Hash`도 같은 full SHA였습니다. slash가 있는 branch query의 실패는 별도로 확인했습니다.
+2026-10-18에 공개 core commit `2b3c6f8d7e35e9f83a1b7173cde788ac52ca442e`를 대상으로 외부 독립 Go module에서 public import와 prefix route, 두 instance·두 game의 실제 WS 생성·목록·private 입장·시작·서버 권위 이동·퇴장, 한 instance 종료 뒤 host와 다른 instance 생존을 검증했습니다. local replace와 별도로 이 SHA를 실제 no-replace module로 내려받아 같은 검사를 실행했습니다. direct revision 조회의 `Origin.Hash`도 같은 full SHA였습니다. 당시 slash가 있는 branch query가 `invalid version: disallowed version string`으로 실패하는 것도 별도로 확인했습니다.
 
-실제 Godot **4.7.2** client는 새 embedding binary의 `/coopdock/ws`에 연결해 default integration, 짧은 read timeout의 heartbeat, `default,game-a,game-b` namespace integration을 확인했습니다. 기존 Godot production 파일은 변경하지 않았습니다. native 화면·OS 수동 입력·목표 규모 load·성능·TLS 배포를 새로 검증한 결과는 아닙니다.
+당시 실제 Godot **4.7.2** client는 embedding binary의 `/coopdock/ws`에 연결해 default integration, 짧은 read timeout의 heartbeat, `default,game-a,game-b` namespace integration을 확인했습니다. 기존 Godot production 파일은 변경하지 않았습니다. native 화면·OS 수동 입력·목표 규모 load·성능·TLS 배포를 새로 검증한 결과는 아닙니다.
