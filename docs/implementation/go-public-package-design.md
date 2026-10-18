@@ -120,8 +120,8 @@ default 단독 bare `/ws` 호환, multi/named-only missing `game_id` 400, malfor
 
 - root package의 external test package는 public 타입만으로 compile·설정·HTTP/WS·수명을 검사한다. 내부 lifecycle failure injection은 비공개 test seam으로만 수행한다.
 - 별도 temporary module에서 public import, 기존 mux와 custom health, 두 CoopDock 인스턴스, 하나의 인스턴스 안의 두 game, 실제 WS room/start/move, 한 인스턴스 shutdown 뒤 다른 instance와 host route 정상 여부를 확인한다.
-- local `replace`는 개발 중 import 경계 증거다. push 뒤에는 replace와 workspace 없이 `go get github.com/sangjinsu/coopdock@codex/godot-client-example` 또는 실제 pushed SHA를 실행하고 resolved module version/commit을 기록하여 remote 소비를 별도로 입증한다.
-- 아직 main의 public package를 보장하지 않으므로 문서에 bare `go get ...` 또는 `@latest`를 설치 성공 경로로 적지 않는다. branch query와 commit pin의 재현성 차이를 설명한다.
+- local `replace`는 개발 중 import 경계 증거다. push 뒤에는 replace와 workspace 없이 `go get github.com/sangjinsu/coopdock@2b3c6f8d7e35e9f83a1b7173cde788ac52ca442e` 같은 실제 pushed SHA를 실행하고 resolved module version/commit을 기록하여 remote 소비를 별도로 입증한다.
+- 아직 main의 public package를 보장하지 않으므로 문서에 bare `go get ...` 또는 `@latest`를 설치 성공 경로로 적지 않는다. 검증한 commit pin 또는 resolved pseudo-version을 사용한다. 실제 Go 1.27.2에서 slash branch query `@codex/godot-client-example`는 `invalid version: disallowed version string`으로 거절되었다. branch 선택은 Git checkout으로 안내한다.
 - module migration으로 이전 Go source hash는 새 결과의 근거가 될 수 없다. 새 production source hash·Go version·command·exit·log를 기록한다. production 변경 끝에 full Go test/race/vet/build를 각각 한 번 수행하고 후속 변경이 없으면 그 증거를 재사용한다.
 - Godot default 실연결과 game scope runner를 embedding 서버 대상으로 실행한다. 기존 native 시각 QA나 목표 규모 성능을 새로 검증했다고 표현하지 않는다.
 

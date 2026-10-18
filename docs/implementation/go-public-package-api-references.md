@@ -7,7 +7,7 @@
 | internal package | `src/cmd/go/alldocs.go:2943-2969` | internal 위의 import prefix를 공유하는 코드만 내부 package를 import할 수 있다. 외부 module은 공개 root package를 import하며 root가 internal 구현을 조립한다. |
 | module와 import path | `src/cmd/go/alldocs.go:2973-2997` | package import는 module path와 package 상대 경로로 구성된다. 첫 요소에 dot이 없는 경로는 표준 library용이다. module을 실제 GitHub 경로로 옮기고 저장소 import 문자열을 함께 갱신한다. |
 | go get | `src/cmd/go/alldocs.go:690-730` | go get은 원하는 version의 dependency를 module에 추가하고 source를 cache에 받는다. public import의 증거는 실제 외부 module에서 build/run까지 포함해야 한다. |
-| revision query | `src/cmd/go/internal/modload/query.go:36-75,139-161` | version query는 revision을 받을 수 있고 branch/non-version tag/commit ID를 처리한다. 문서의 branch 또는 pushed SHA를 실제 go get으로 확인하고 resolved pseudo-version을 기록한다. |
+| revision query | `src/cmd/go/internal/modload/query.go:36-75,139-161` | version query는 revision을 받을 수 있고 branch/non-version tag/commit ID를 처리한다. 실제 pushed SHA의 go get과 resolved pseudo-version을 확인한다. slash branch query는 별도 실제 실행에서 거절되어 설치 경로로 쓰지 않는다. |
 | HTTP Handler | `src/net/http/server.go:65-90` | ServeHTTP는 요청 응답을 처리하는 interface다. Handler 반환 API는 host의 listener나 process signal 소유를 요구하지 않는다. handler와 server 수명을 구분한다. |
 | HTTP shutdown | `src/net/http/server.go:3252-3276` | http.Server.Shutdown은 listener/idle·active HTTP를 처리하지만 hijacked WebSocket을 닫거나 기다리지 않는다. CoopDock의 transport close를 따로 실행하고 완료를 기다린다. |
 | HTTP close | `src/net/http/server.go:3213-3220` | http.Server.Close 역시 hijacked connection을 알지 못한다. HTTP Close를 WebSocket cleanup 대신 사용하지 않는다. |
@@ -26,3 +26,5 @@
 환경변수와 process signal을 분리하는 결정, 공개 Config의 범위, default 기반 설정, timeout 이후 cleanup 지속은 위 공식 동작과 현재 CoopDock 수명 구현을 조합한 설계 결정이다. Go 자체가 CoopDock의 종료 계약을 제공한다는 뜻은 아니다.
 
 외부 확인용 공식 문서 주소: [cmd/go](https://pkg.go.dev/cmd/go), [net/http.Server.Shutdown](https://pkg.go.dev/net/http#Server.Shutdown), [context](https://pkg.go.dev/context), [Go module reference](https://go.dev/ref/mod). 이번 확인은 이 링크를 웹에서 새로 조회한 것이 아니라 위 설치 원문을 읽었다.
+
+2026-10-18 Task 2 실제 remote 확인: `go get github.com/sangjinsu/coopdock@2b3c6f8d7e35e9f83a1b7173cde788ac52ca442e`가 `v0.0.0-20261018115756-2b3c6f8d7e35`로 해석되었다. 반면 `@codex/godot-client-example`는 `invalid version: disallowed version string`으로 거절되었다. 따라서 일반 revision query 지원을 이 slash branch의 설치 성공으로 확대하지 않는다. `GOPROXY=direct go list -m -json github.com/sangjinsu/coopdock@<위 SHA>`의 `Origin.Hash`는 위 full SHA와 일치한다. 외부 module과 상세 사용법은 [embedding 가이드](../go-embedding.md)에 있다.

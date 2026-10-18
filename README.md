@@ -39,6 +39,8 @@ go run ./cmd/server
 [Godot 예제](examples/godot/README.md)를 두 창으로 열어 같은 게임 ID와 룸에 접속하고, 방장이 게임을 시작하면 함께 움직일 수 있습니다.
 서버만 먼저 확인하려면 [빠른 시작의 6개 WebSocket 연결 검사](docs/getting-started.md#4-여섯-연결로-검사하기)를 실행하세요.
 
+기존 Go HTTP 서버에 룸 기능을 넣으려면 [Go embedding 예제와 가이드](docs/go-embedding.md)를 사용하세요.
+
 현재는 **자유 공간 이동을 제공하는 초기 reference 구현**입니다.
 게임별 지형·충돌·승패 규칙은 후속 범위이며, `game_id`는 게임별 룸을 구분하는 공개 namespace입니다.
 지원 범위와 검증 한계는 [현재 단계](docs/server-guide.md#현재-단계)를 참조하세요.

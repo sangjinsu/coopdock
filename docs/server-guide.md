@@ -1,6 +1,6 @@
 # 서버 사용·운영 가이드
 
-Go **1.26 이상**이 필요합니다. `roomserver`는 내부 module 이름입니다. 이 서버는 하나의 프로세스에서 guest 연결, 룸 생성, ASCII 6자리 번호 입장, private 비밀번호 확인, 공개 목록, 퇴장과 연결 정리, host의 게임 시작과 서버 권위 3D 이동을 제공합니다.
+Go **1.26 이상**이 필요합니다. module/import 경로는 `github.com/sangjinsu/coopdock`입니다. 기존 Go host에 넣는 방법은 [embedding 가이드](go-embedding.md)에 있습니다. 이 서버는 하나의 프로세스에서 guest 연결, 룸 생성, ASCII 6자리 번호 입장, private 비밀번호 확인, 공개 목록, 퇴장과 연결 정리, host의 게임 시작과 서버 권위 3D 이동을 제공합니다.
 
 ```bash
 cd coopdock
@@ -234,9 +234,9 @@ Origin 검사는 기본으로 same host와 Origin이 없는 native 연결을 허
 
 ## 종료와 검증
 
-`SIGINT` 또는 `SIGTERM`을 받으면 transport 신규 수용을 닫고 기존 WS를 cancel/close한 뒤 룸 세션·actor·hash worker를 정리하고 HTTP shutdown을 수행합니다. `http.Server.Shutdown`만으로 WS 정리가 되지 않으므로 transport가 직접 WS를 종료합니다. HTTP header timeout은 5s, idle timeout은 60s입니다.
+`SIGINT` 또는 `SIGTERM`을 받으면 공개 `Server.Shutdown`으로 신규 수용을 닫고 기존 WS를 cancel/close한 뒤 룸 세션·actor·hash worker·선택적 collector를 정리하고 HTTP shutdown도 호출합니다. `http.Server.Shutdown`만으로 WS 정리가 되지 않으므로 transport가 직접 WS를 종료합니다. HTTP header timeout은 5s, idle timeout은 60s입니다.
 
-`transport.Server.Close(ctx)`는 caller/config deadline이면 오류를 반환하면서 정리를 계속합니다. pending Accept와 연결 goroutine도 기다립니다. 정상 종료는 모든 정리가 끝난 뒤 반환합니다. 아직 끝나지 않은 Argon 계산 때문에 설정 시간을 넘길 수 있으며, 현재 실행 프로그램은 종료 timeout 오류가 반환되면 nonzero로 종료합니다. 운영 supervisor의 강제 종료 grace는 이 특성을 고려해야 합니다.
+`coopdock.Server.Shutdown(ctx)`는 caller 또는 transport 설정 deadline이면 오류를 반환하면서 background 정리를 계속합니다. 새 context로 재호출하여 완료를 기다릴 수 있고 완료 후 재호출은 nil입니다. core 종료는 host HTTP listener·고유 route·다른 instance를 닫지 않습니다. pending Accept와 연결 goroutine도 기다립니다. 정상 종료는 모든 정리가 끝난 뒤 반환합니다. 아직 끝나지 않은 Argon 계산 때문에 설정 시간을 넘길 수 있으며, 현재 실행 프로그램은 종료 timeout 오류가 반환되면 nonzero로 종료합니다. 운영 supervisor의 강제 종료 grace는 이 특성을 고려해야 합니다.
 
 실제 실행 프로세스를 검사하려면 서버를 켜 둔 뒤 다른 터미널에서 다음을 실행합니다. 검증 CLI는 임시 룸을 만들고 검사 후 모든 WS를 닫습니다. assertion 실패나 연결 실패는 exit 1입니다.
 

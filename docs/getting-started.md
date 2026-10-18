@@ -16,7 +16,7 @@ cd coopdock
 go version
 ```
 
-Go module 이름은 내부 식별자인 `roomserver`입니다.
+Go module/import 경로는 `github.com/sangjinsu/coopdock`입니다. 기존 Go application에 넣으려면 [embedding 가이드](go-embedding.md)의 명시적 commit 설치를 따르세요.
 첫 Go 명령 실행 시 `go.mod`에 고정된 dependency를 내려받으므로 네트워크 연결이 필요할 수 있습니다.
 
 ## 2. 서버 실행하기
