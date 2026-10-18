@@ -12,6 +12,14 @@ Go **1.26 이상**이 필요합니다. 외부 application의 module 루트에서
 go get github.com/sangjinsu/coopdock
 ```
 
+Go 공개 proxy의 이전 module cache 때문에 `module declares its path as: roomserver` 오류가 나면 다음 명령으로 저장소에서 직접 설치하세요.
+
+```bash
+GOPROXY=direct go get github.com/sangjinsu/coopdock
+```
+
+기본 명령은 Go module mirror를 이용합니다. `GOPROXY=direct`는 mirror를 건너뛰고 같은 module의 저장소에서 version을 조회하며, 적절한 tag가 없는 새 설치에서는 default branch의 revision을 선택합니다. 이 설정은 위 명령에만 적용되어 Go 설정을 영구 변경하지 않습니다. mirror의 cache와 직접 조회 설정은 [Go Module Mirror 공식 FAQ](https://proxy.golang.org/)에서 확인할 수 있습니다.
+
 선택한 version은 `go.mod`에 기록됩니다. 이후 업데이트할 때는 다음을 명시적으로 실행합니다.
 
 ```bash

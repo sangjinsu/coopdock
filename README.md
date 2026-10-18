@@ -47,6 +47,12 @@ go run ./cmd/server
 go get github.com/sangjinsu/coopdock
 ```
 
+Go 공개 proxy의 이전 module cache 때문에 `module declares its path as: roomserver` 오류가 나면 다음 명령으로 저장소에서 직접 설치하세요.
+
+```bash
+GOPROXY=direct go get github.com/sangjinsu/coopdock
+```
+
 다음은 **기존 host의 초기화에 넣는 함수**입니다. CoopDock을 host의 최상위 Handler로 연결하고, 종료할 때 사용할 instance를 반환합니다.
 
 ```go
