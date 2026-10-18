@@ -1,6 +1,6 @@
 # CoopDock · 코옵독
 
-[![CoopDock v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/sangjinsu/coopdock/releases/tag/v0.1.0)
+[![CoopDock v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/sangjinsu/coopdock/releases/tag/v0.1.0) [![Go CI](https://github.com/sangjinsu/coopdock/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sangjinsu/coopdock/actions/workflows/ci.yml)
 
 **방을 만들고, 친구를 초대하고, 함께 움직이세요.**
 
