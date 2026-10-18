@@ -47,3 +47,12 @@ static func ready_client(playing: bool = false) -> FakeClient:
 		var epoch: int = client.state.begin_admission()
 		client.state.apply_admission(snapshot("rA", "mA"), epoch)
 	return client
+
+class FailOnceClient extends FakeClient:
+	var fail_next: bool = true
+	func _send_text(text: String) -> Error:
+		if fail_next:
+			fail_next = false
+			return ERR_BUSY
+		sent.append(text)
+		return OK

@@ -25,6 +25,11 @@ func _run() -> void:
 	test_heartbeat_and_limits()
 	await test_lobby_behaviors()
 	await test_lobby_pre_ready_rooms()
+	test_snapshot_buffer()
+	await test_movement_keys()
+	await test_direction_retry()
+	await test_world_lifecycle()
+	test_same_capture()
 	print("unit checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
 
@@ -345,3 +350,150 @@ func test_lobby_pre_ready_rooms() -> void:
 	lobby.queue_free()
 	client.free()
 	await process_frame
+
+func test_snapshot_buffer() -> void:
+	var buffer := SnapshotBuffer.new()
+	var a := Support.snapshot("rA", "mA", 2, 2, ["sA", "sB"])
+	check(buffer.push_snapshot(a, 1000), "buffer accepts first authoritative sample")
+	check(buffer.sample_positions(1000).get("sA") == Vector3.ZERO, "first position available immediately")
+	var b: Dictionary = a.duplicate(true)
+	b.snapshot_seq = 3
+	b.game_state.players[0].position.x = 10
+	check(buffer.push_snapshot(b, 1100), "buffer accepts advancing sample")
+	check(buffer.sample_positions(1150).get("sA") == Vector3(5, 0, 0), "receive-clock interpolation midpoint")
+	check(buffer.sample_positions(2000).get("sA") == Vector3(10, 0, 0), "buffer never extrapolates")
+	check(not buffer.push_snapshot(a, 2001), "stale capture rejected")
+	check(not buffer.push_snapshot(b, 2002), "duplicate capture rejected")
+	var removed := Support.snapshot("rA", "mA", 3, 4, ["sA"])
+	check(buffer.push_snapshot(removed, 3000), "long-gap snapshot accepted")
+	check(not buffer.sample_positions(3000).has("sB"), "removed player cannot resurrect")
+	check(buffer.sample_positions(3000).get("sA") == Vector3.ZERO, "gap over 500ms snaps immediately")
+	check(buffer.duration_ms <= 200, "duration bounded at 200ms")
+	removed.snapshot_seq = 5
+	removed.game_state.players[0].position.x = 20
+	buffer.push_snapshot(removed, 3001)
+	check(buffer.duration_ms == 16, "burst minimum duration 16ms")
+	removed.snapshot_seq = 6
+	buffer.push_snapshot(removed, 3401)
+	check(buffer.duration_ms == 200, "400ms receive gap capped at 200ms")
+	check(buffer.push_snapshot(Support.snapshot("rB", "mB", 1, 1), 3402), "identity change resets capture sequence")
+	check(buffer.sample_positions(3402).get("sA") == Vector3.ZERO, "new identity snaps without old timeline")
+	buffer.clear()
+	check(buffer.sample_positions(4000).is_empty(), "clear drops timeline")
+
+func inject_key(code: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.physical_keycode = code
+	event.pressed = pressed
+	Input.parse_input_event(event)
+
+func test_movement_keys() -> void:
+	MovementInput.ensure_actions()
+	var movement := MovementInput.new()
+	inject_key(KEY_W, true)
+	await process_frame
+	check(movement.sample(true, false) == Vector3.FORWARD, "physical W maps forward")
+	check(movement.sample(false, false) == Vector3.ZERO, "window focus blocks sampling")
+	check(movement.sample(true, true) == Vector3.ZERO, "text focus blocks sampling")
+	inject_key(KEY_D, true)
+	await process_frame
+	check(movement.sample(true, false).is_equal_approx(Vector3(1, 0, -1).normalized()), "diagonal normalized")
+	movement.release_actions()
+	check(movement.sample(true, false) == Vector3.ZERO, "release clears held movement")
+	inject_key(KEY_W, false)
+	inject_key(KEY_D, false)
+	inject_key(KEY_UP, true)
+	inject_key(KEY_E, true)
+	await process_frame
+	check(movement.sample(true, false).is_equal_approx(Vector3(0, 1, -1).normalized()), "arrow and E map physical axes")
+	check(movement.sample(true, false, false) == Vector3.FORWARD, "y disabled preserves XZ direction")
+	movement.release_actions()
+	inject_key(KEY_UP, false)
+	inject_key(KEY_E, false)
+	inject_key(KEY_Q, true)
+	await process_frame
+	check(movement.sample(true, false) == Vector3.DOWN, "Q maps negative y")
+	movement.release_actions()
+	inject_key(KEY_Q, false)
+	await process_frame
+
+func test_direction_retry() -> void:
+	var client := Support.FailOnceClient.new()
+	client.state.new_connection(1)
+	client.state.accept_guest("sA", "default")
+	client.state.apply_admission(Support.snapshot("rA", "mA"), client.state.begin_admission())
+	var controller := InputController.new()
+	root.add_child(controller)
+	controller.set_process(false)
+	controller.bind_client(client)
+	controller.submit_direction(Vector3.FORWARD)
+	check(client.sent.is_empty(), "rejected direction remains unsent")
+	controller.submit_direction(Vector3.FORWARD)
+	check(client.sent.size() == 1, "same direction retries after send failure")
+	controller.submit_direction(Vector3.FORWARD)
+	check(client.sent.size() == 1, "successful direction deduplicates")
+	controller.set_input_gate(false, false)
+	check(client.sent.size() == 2, "focus loss sends stop")
+	if client.sent.size() >= 2:
+		check(JSON.parse_string(client.sent.back()).payload.action.direction == {"x": 0.0, "y": 0.0, "z": 0.0}, "focus gate sends zero")
+	controller.set_input_gate(true, false)
+	client.state.clear_room()
+	client.snapshot_changed.emit({})
+	client.state.apply_admission(Support.snapshot("rB", "mB"), client.state.begin_admission())
+	client.snapshot_changed.emit(client.state.current_snapshot)
+	controller.submit_direction(Vector3.FORWARD)
+	check(client.sent.size() == 3, "new match cannot dedup first direction against old match")
+	client.send_error = ERR_BUSY
+	# The subclass only fails once, so use pending saturation for stop retry.
+	client.max_pending = client._pending.size()
+	controller.set_input_gate(false, false)
+	check(controller._last_sent_direction == Vector3.FORWARD, "failed stop never updates successful direction")
+	client.max_pending = 64
+	controller.set_input_gate(true, false)
+	controller.submit_direction(Vector3.RIGHT)
+	check(client.sent.size() >= 4 and JSON.parse_string(client.sent.back()).payload.action.direction == {"x": 0.0, "y": 0.0, "z": 0.0}, "stop retry precedes newly requested movement")
+	controller.queue_free()
+	client.free()
+	await process_frame
+
+func test_world_lifecycle() -> void:
+	var client := Support.ready_client(true)
+	var world := GameWorld.new()
+	root.add_child(world)
+	world.bind_client(client)
+	await process_frame
+	check(world.avatars.has("sA"), "new self avatar visible from authoritative sample")
+	var snapshot := Support.snapshot("rA", "mA", 2, 2, ["sA", "sB"])
+	client.snapshot_changed.emit(snapshot)
+	check(world.avatars.has("sB"), "new peer appears immediately")
+	if world.avatars.has("sA"):
+		var before: Vector3 = world.avatars.sA.position
+		client.input_acknowledged.emit({"match_id": "mA", "input_seq": 5, "server_tick": 9})
+		check(world.avatars.sA.position == before, "ACK never writes avatar position")
+	# Metadata can advance while the capture sequence remains unchanged.
+	var metadata := Support.snapshot("rA", "mA", 3, 2, ["sA"])
+	client.snapshot_changed.emit(metadata)
+	check(not world.avatars.has("sB"), "metadata removal takes effect in same frame")
+	client.snapshot_changed.emit(Support.snapshot("rA", null, 4, 3))
+	check(world.avatars.is_empty() and world.buffer.sample_positions(9999).is_empty(), "WAITING clears world and interpolation")
+	client.state.clear_room()
+	client.state.apply_admission(Support.snapshot("rEnded", "mEnded", 1, 1), client.state.begin_admission())
+	client.snapshot_changed.emit(client.state.current_snapshot)
+	var ended := Support.snapshot("rEnded", null, 2, 2)
+	check(client.state.apply_event("game.ended", {"match_id": "mEnded", "snapshot": ended}), "synthetic game.ended returns state to WAITING")
+	client.snapshot_changed.emit(client.state.current_snapshot)
+	check(world.avatars.is_empty() and world.buffer.sample_positions(9999).is_empty(), "synthetic game.ended clears renderer timeline")
+	client.snapshot_changed.emit({})
+	world.queue_free()
+	client.free()
+	await process_frame
+
+func test_same_capture() -> void:
+	var a := Support.snapshot("rA", "mA")
+	var b: Dictionary = a.duplicate(true)
+	check(TestDriver.same_capture([a, b]), "equal full capture agrees")
+	b.game_state.players[0].position.x = 1
+	check(not TestDriver.same_capture([a, b]), "matching capture identity with different position fails")
+	b = a.duplicate(true)
+	b.snapshot_seq += 1
+	check(not TestDriver.same_capture([a, b]), "different capture identity cannot pass")
