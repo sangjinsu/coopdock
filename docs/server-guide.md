@@ -11,6 +11,14 @@ go run ./cmd/server
 
 기본 주소는 `127.0.0.1:8080`입니다. 다른 주소가 필요하면 `HTTP_ADDR=127.0.0.1:9090 go run ./cmd/server`처럼 지정합니다.
 
+하나의 서버에서 여러 게임의 룸을 분리하려면 시작할 때 `GAME_IDS=default,game-a,game-b`를 설정하고 각각 `ws://127.0.0.1:8080/ws?game_id=game-a`처럼 접속합니다. `GAME_IDS`는 1~32개의 고유 ID를 쉼표로 나눈 allowlist이며 ID는 ASCII `[a-z0-9][a-z0-9_-]{0,63}`입니다. 설정 항목 양끝 공백은 제거하지만 빈 항목·중복·잘못된 ID는 시작을 거절합니다. 미설정 기본값은 `default`입니다. bare `/ws`는 등록 목록이 정확히 `default` 하나일 때만 호환됩니다. 여러 게임 또는 단일 named game 구성에서는 `game_id`를 반드시 명시합니다.
+
+연결 query는 `game_id` 하나만 허용하고 raw query는 최대 1024 bytes입니다. 누락(위 호환 예외 제외)·빈 값·중복·잘못된 ID·미정의 key·malformed query는 upgrade 전에 HTTP 400 `Invalid game selection.`, 형식은 맞지만 미등록 ID는 404 `Game was not found.`입니다. 이 단계는 WS JSON 오류를 보내지 않습니다. 연결의 게임은 guest 발급 시 고정되며 변경하려면 연결을 끊고 새 guest로 접속합니다. room 요청 payload에 `game_id`를 추가하면 `INVALID_MESSAGE`입니다.
+
+create/list/join은 연결된 게임만 대상으로 하며 public 목록에서도 다른 게임의 룸을 숨깁니다. 번호는 게임 안에서만 고유하여 서로 다른 게임에서 같은 6자리 번호가 존재할 수 있습니다. 다른 게임에만 있는 번호는 private 비밀번호 유무와 관계없이 `ROOM_NOT_FOUND`입니다. 같은 번호의 자기 게임 룸이 있으면 그 룸을 대상으로 기존 입장 검사를 수행합니다. `game_id`는 공개 namespace이며 인증 증명이 아닙니다. 누구나 등록된 ID로 새 연결을 선택할 수 있고, 게임별 인증·인가는 별도 정책이 필요합니다.
+
+등록된 모든 게임은 현재 공통 reference movement handler를 사용합니다. namespace 분리는 게임마다 다른 rules·action/state schema·지형·승패를 등록하는 기능이 아닙니다. 게임별 rules 지원은 후속 설계입니다. room/session 상한·hash worker/queue·IP 실패 한도는 전체 게임이 공유하며 게임별 quota와 CPU/성능 격리를 보장하지 않습니다.
+
 | HTTP 경로 | 동작 |
 |---|---|
 | GET `/healthz` | 프로세스 상태: 200 |
@@ -46,7 +54,7 @@ Basic 자격증명은 browser가 native cache에 보관할 수 있어 앱이 log
 
 - `RUNNING`은 서버 실행 상태이고 `ready`는 신규 게임 수용 gate입니다. `STOPPING`은 종료 진행입니다. readiness true는 여유 정원·낮은 지연·모든 자료의 최신 상태를 보장하지 않습니다. DRAINING과 admin drain은 후속입니다.
 - `active_connections`는 룸 밖을 포함한 live game 연결 수, `room_member_count`는 실제 룸 membership 합계입니다. 룸 수와 WAITING/PLAYING 룸 수를 따로 표시합니다.
-- 룸 목록은 public/private 모두 표시합니다. 게임 `room.list`는 public-only를 유지합니다. 번호는 ASCII 6자리 **문자열**로 앞 0을 유지하며 내부 `room_id`, host ID, nullable match ID를 구분합니다. WAITING의 `match_id`는 `null`입니다.
+- 룸 목록은 public/private 모두 표시하고 `game_id` 열로 게임을 구분합니다. 게임 `room.list`는 연결된 게임의 public-only를 유지합니다. 번호는 ASCII 6자리 **문자열**로 앞 0을 유지하며 내부 `room_id`, host ID, nullable match ID를 구분합니다. WAITING의 `match_id`는 `null`입니다.
 - heap은 `HeapAlloc` bytes를 MiB로 표시하며 OS RSS가 아닙니다. goroutine은 Go 실행 작업 수이며 플레이어 수가 아닙니다. CPU·RTT·클라이언트 표시지연은 API `null`, 화면 `미측정`입니다.
 
 room actor summary·background collector·runtime sampler는 각각 1초 주기입니다. HTTP는 cache만 읽으며 actor/manager lock·callback·runtime sampling을 실행하지 않습니다. actor summary 게시에는 게임 `snapshot()`을 재사용하지 않으며 revision·snapshot_seq를 증가시키지 않습니다. admin이 꺼져도 actor의 1초 summary heartbeat는 유지합니다. collector/runtime loop는 0개지만 이 고정 게시 비용은 남으며 최대 룸 수는 `ROOM_MAX_ROOMS`로 제한합니다. 게시·runtime sampling의 실제 게임 부하 영향은 미측정입니다.
@@ -59,7 +67,7 @@ room actor summary·background collector·runtime sampler는 각각 1초 주기�
 
 ### 룸 검색과 API
 
-UI는 100개씩 번호 오름차순으로 표시하고 이전/다음, 번호 앞자리·phase·visibility 필터를 제공합니다. 서버는 **전체 cache에 필터를 먼저 적용한 뒤** pagination합니다. 같은 번호는 내부 room ID로 정렬합니다. 빈 서버와 필터 결과 없음도 구별합니다.
+UI는 100개씩 표시하고 이전/다음, 게임 ID exact match·번호 앞자리·phase·visibility 필터를 제공합니다. 서버는 **전체 cache에 필터를 먼저 적용한 뒤** `(game_id, room_number, room_id)` 오름차순으로 정렬하고 pagination합니다. 빈 서버와 필터 결과 없음도 구별합니다.
 
 | `/admin/api/rooms` query | 기본값 / 허용값 |
 |---|---|
@@ -68,8 +76,9 @@ UI는 100개씩 번호 오름차순으로 표시하고 이전/다음, 번호 앞
 | `number_prefix` | 빈 문자열 / ASCII 숫자 0~6자리 |
 | `phase` | `all` / `all`, `WAITING`, `PLAYING` |
 | `visibility` | `all` / `all`, `public`, `private` |
+| `game_id` | 생략 시 전체 / 위 ID 문법의 정확한 값; 빈 값 금지 |
 
-알 수 없는 key·중복 key·잘못된 값·malformed query는 400입니다. `total`은 모든 룸 수, `matched_total`은 필터 일치 수, `rooms`는 현재 페이지입니다. 결과가 없으면 배열 `[]`이며 `null`이 아닙니다. 정확한 JSON 필드는 [메시지와 API](specs/04-messages-and-api.md#현재-운영-json-계약)에 있습니다. summary/cache/API/HTML/로그에는 password·hash·salt·운영 token·전체 member ID 목록·game_state를 넣지 않습니다.
+알 수 없는 key·중복 key·잘못된 값·malformed query는 400입니다. 문법이 맞는 미등록 `game_id` 필터는 200과 빈 결과를 반환합니다. `total`은 필터와 관계없이 모든 게임의 룸 수, `matched_total`은 모든 필터 일치 수, `rooms`는 현재 페이지입니다. status의 연결·membership·룸 counter도 서버 전체 합계입니다. admin은 인증된 전체 운영 조회이며 게임별 tenant 권한을 제공하지 않습니다. 결과가 없으면 배열 `[]`이며 `null`이 아닙니다. 정확한 JSON 필드는 [메시지와 API](specs/04-messages-and-api.md#현재-운영-json-계약)에 있습니다. summary/cache/API/HTML/로그에는 password·hash·salt·운영 token·전체 member ID 목록·game_state를 넣지 않습니다.
 
 ## 실제 WebSocket 메시지
 
@@ -78,7 +87,7 @@ UI는 100개씩 번호 오름차순으로 표시하고 이전/다음, 번호 앞
 연결 직후 서버 이벤트:
 
 ```json
-{"version":1,"op":"session.guest","request_id":null,"payload":{"session_id":"server-issued-id"},"error":null}
+{"version":1,"op":"session.guest","request_id":null,"payload":{"session_id":"server-issued-id","game_id":"game-a"},"error":null}
 ```
 
 공개 룸 생성 요청과 번호 입장 요청:
@@ -91,10 +100,12 @@ UI는 100개씩 번호 오름차순으로 표시하고 이전/다음, 번호 앞
 생성 및 입장 성공 응답의 `payload.snapshot`은 전체 공개 상태입니다. 아래 ID·번호는 형식 예시입니다.
 
 ```json
-{"version":1,"op":"room.create","request_id":"create-public","payload":{"snapshot":{"room_id":"room-id","room_number":"004271","visibility":"public","capacity":6,"match_id":null,"phase":"WAITING","host_id":"guest-id","members":[{"session_id":"guest-id"}],"revision":1,"game_state":null,"server_tick":0,"snapshot_seq":1,"last_processed_input_seq":{"guest-id":0}}},"error":null}
+{"version":1,"op":"room.create","request_id":"create-public","payload":{"snapshot":{"game_id":"game-a","room_id":"room-id","room_number":"004271","visibility":"public","capacity":6,"match_id":null,"phase":"WAITING","host_id":"guest-id","members":[{"session_id":"guest-id"}],"revision":1,"game_state":null,"server_tick":0,"snapshot_seq":1,"last_processed_input_seq":{"guest-id":0}}},"error":null}
 ```
 
 이 응답과 같은 revision의 초기 `room.state`를 processor에서 바로 이어 송신 FIFO에 넣고 이후 상태 이벤트를 전달합니다. core가 보내는 같은 revision의 초기 중복은 제외합니다. full 상태를 새로 캡처할 때마다 `snapshot_seq`가 증가하며 하나의 capture를 response/event에 재사용하면 같은 번호입니다. `room.state.payload`는 위 `snapshot` 내부 구조이며 `request_id`는 `null`입니다. 퇴장 후 재입장할 때 이전 membership의 오래된 이벤트는 새 입장 초기 상태보다 앞서 전달하지 않습니다.
+
+`session.guest.payload.game_id`와 모든 full snapshot의 `game_id`는 **version 1 응답 schema의 추가 필드**입니다. create/join/start 응답의 snapshot, room.state/game.snapshot, game.started/game.ended 내부 snapshot, room.list의 각 항목에 포함됩니다. envelope와 기존 request payload·action ACK·leave ACK·game.event는 유지합니다. bare URL 호환만으로 strict 구버전 client가 호환되지는 않습니다. guest/snapshot key 집합을 엄격히 검사하는 client는 서버와 함께 업데이트해야 하며 모든 구버전 client의 호환을 보장하지 않습니다. 갱신된 Godot adapter는 요청한 게임과 guest·list·snapshot의 게임 일치를 검증하고 게임 ID가 없는 구서버 응답도 거절합니다.
 
 Private 룸 생성 및 비밀번호 확인 순서:
 
@@ -184,6 +195,7 @@ PLAYING 신규 입장·재입장은 `ROOM_IN_PROGRESS`입니다. 일부 참가�
 |---|---:|---|
 | `ADMIN_VIEWER_TOKEN` | 미설정(비활성) | 설정 시 32~256 bytes, `0x21..0x7e`만 허용 |
 | `HTTP_ADDR` | `127.0.0.1:8080` | 비어 있지 않은 host와 port 1~65535 |
+| `GAME_IDS` | `default` | 쉼표 구분 고유 ID 1~32개; ASCII `[a-z0-9][a-z0-9_-]{0,63}` |
 | `WS_ORIGINS` | 추가 목록 없음 | 쉼표로 나눈 명시 host 또는 host:port; wildcard·scheme·host 내부 공백 금지, 항목 양끝 공백 제거 |
 | `ROOM_MAX_ROOMS` | 128 | 1~4096 |
 | `ROOM_MAX_SESSIONS` | 768 | 1~24576 |
@@ -216,6 +228,8 @@ PLAYING 신규 입장·재입장은 `ROOM_IN_PROGRESS`입니다. 일부 참가�
 
 Argon2id의 고정값은 time=2, parallelism=1, salt=16bytes, hash=32bytes입니다. 실행 중인 Argon 계산은 취소로 즉시 중단되지 않습니다. worker는 계산이 끝날 때까지 유지하고 늦은 결과는 membership 변경에 사용하지 않습니다. room/transport 요청 timeout 중 먼저 도달한 제한이 적용됩니다.
 
+`ROOM_MAX_ROOMS`·`ROOM_MAX_SESSIONS`·hash pool·queue·failure-key 상한과 IP 실패 counter는 모든 게임이 공유합니다. 같은 번호라도 게임이 다르면 서로 다른 룸이며 룸 실패 counter가 합쳐지지 않습니다. 같은 IP의 여러 게임 실패는 공통 IP 한도에 누적됩니다. 한 게임이 전체 수용량을 사용할 수 있습니다.
+
 Origin 검사는 기본으로 same host와 Origin이 없는 native 연결을 허용합니다. 외부 브라우저가 필요하면 `WS_ORIGINS=localhost:9000,example.com`처럼 추가합니다. `InsecureSkipVerify`는 켜지 않습니다. 제한에 쓰는 IP는 `RemoteAddr`에서 얻으며 `X-Forwarded-For`를 신뢰하지 않습니다. 외부 운영에서는 WSS 연결을 구성해야 합니다.
 
 ## 종료와 검증
@@ -227,9 +241,11 @@ Origin 검사는 기본으로 same host와 Origin이 없는 native 연결을 허
 실제 실행 프로세스를 검사하려면 서버를 켜 둔 뒤 다른 터미널에서 다음을 실행합니다. 검증 CLI는 임시 룸을 만들고 검사 후 모든 WS를 닫습니다. assertion 실패나 연결 실패는 exit 1입니다.
 
 ```bash
-go run ./cmd/roomcheck -url ws://127.0.0.1:8080/ws -movement -timeout 30s
+go run ./cmd/roomcheck -url ws://127.0.0.1:8080/ws -game-id default -movement -timeout 30s
 # Run only the room admission checks.
-go run ./cmd/roomcheck -url ws://127.0.0.1:8080/ws -movement=false -race-runs 3 -timeout 30s
+go run ./cmd/roomcheck -url ws://127.0.0.1:8080/ws -game-id default -movement=false -race-runs 3 -timeout 30s
+# With GAME_IDS=default,game-a,game-b, also check foreign namespace isolation.
+go run ./cmd/roomcheck -url ws://127.0.0.1:8080/ws -game-id game-a -other-game-id game-b -timeout 30s
 ```
 
 검사 범위는 public/private 실제 6 WS 입장, 7번째 `ROOM_FULL`, 비밀번호 누락→오류→정답, private 목록 제외, 5명 룸의 마지막 자리 두 연결 동시 입장입니다. `-race-runs`는 1~100, `-timeout`은 0 초과 Go duration입니다. `-movement`는 기본 true이며 기존 입장 검사 이후 별도 6 WS로 시작 → 각 참가자의 seq1 이동 ACK → 두 capture의 양의 Z 이동·불변 X/Y·속도 5 → seq2 정지 ACK → 추가 두 capture의 정지 위치 유지를 검사합니다. 같은 `(match_id,revision,server_tick,snapshot_seq)`를 6명 모두 받으면 full 상태·member 순서·seq map을 비교합니다. reader는 연결별 하나이며 수신 채널과 최근 capture key는 각각 최대 128개, overflow는 실패입니다. 서버 TickHz를 추측해 이동 거리 공식을 강제하지 않습니다. 마지막 6개 퇴장 ACK와 빈 룸 제거를 확인하고 WS를 닫습니다. 부하·Godot 화면 검증은 포함하지 않습니다.

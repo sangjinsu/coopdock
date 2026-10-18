@@ -77,3 +77,7 @@ go run ./cmd/roomcheck -url ws://127.0.0.1:18080/ws -game-id game-a -other-game-
 2. [ ] default 단독 bare `/ws` 호환과 다중게임 missing 거절은 actual-WS transport suite 증거로 확인한다. 실제 Godot 결과·CLI 결과·deterministic 같은번호 core 증거를 구분한다. 네 Godot 연결 결과를 원래 Task 3 six-client/native QA 완료로 표현하지 않는다.
 3. [ ] admin 게임 표시/filter와 전체 합계, 종료 후 세션/룸 cleanup을 확인한다. GAME_IDS 정책, v1 nested additive field/strict 구버전 업데이트, public namespace≠인증, global caps, 공통 movement만 지원함을 서버 계약 문서에 반영한다.
 4. [ ] root가 변경 diff·fresh verification report를 Architect에게 검토받는다. 승인 후 namespace 완료를 기록하고 기존 Godot Task 3 owner에게 checkpoint와 새 계약을 전달한다. Task 3~5는 기존 계획대로 지속하며 전체 사용자 목표 완료는 별도로 판단한다.
+
+### 실행 결과 보정 — 2026-10-18
+
+Task 3 dispatch amendment에 따라 위 명령 목록을 일괄 재실행하지 않았다. Go 전체 test/race/vet/build는 최초 SHA `091710c7…`의 성공과 최종 SHA `4e3c7792…`의 두 파일 fix1 covering chain을 결합한다(`work/game-scope/go/verification-chain-fix1.json`). 최종 SHA에서 전체 suite를 실행했다는 뜻이 아니다. production 4 GD SHA `82e6d4f5…`와 integration runner가 그대로임을 비교해 실제 Godot 4 socket 89/89를 재사용했다. 새 owned 서버에서는 default 명시 및 game-a/game-b 독립 roomcheck 두 subprocess, 인증 admin exact filter·전체 counter·종료 cleanup만 검증했다. 두 CLI와 runner exit 0, 소유 서버 cleanup exit 0이다. 상세는 `work/game-scope/integration-report.md`와 `.superpowers/sdd/game-isolation-plan/task-3-report.md`다. native 시각 QA·실제 배포·게임별 rules·원래 Godot Task 3~5 완료나 최종 Architect 승인을 이 결과로 대신하지 않는다.
