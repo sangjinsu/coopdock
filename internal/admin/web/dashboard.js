@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const automaticControl = $("auto-refresh");
   const refreshControl = $("refresh");
-  const fields = [$("room-number"), $("phase"), $("visibility")];
+  const fields = [$("room-number"), $("phase"), $("visibility"), $("game-id")];
   const numberFormat = new Intl.NumberFormat("ko-KR");
   let generation = 0, active = null, timer = null, displayTimer = null;
   let automatic = true, locked = false, pendingRefresh = false, pageActive = true, visibleResumed = true, offset = 0;
@@ -13,16 +13,19 @@
 
   function setText(id, value) { $(id).textContent = value; }
   function query() {
-    return {number_prefix: fields[0].value, phase: fields[1].value, visibility: fields[2].value, offset, limit: 100};
+    return {...(fields[3].value ? {game_id: fields[3].value} : {}), number_prefix: fields[0].value, phase: fields[1].value, visibility: fields[2].value, offset, limit: 100};
   }
   function validQuery() {
     const valid = /^[0-9]{0,6}$/.test(fields[0].value);
     fields[0].setAttribute("aria-invalid", String(!valid));
     setText("number-error", valid ? "" : "ASCII 숫자 6자리까지 입력하세요.");
-    return valid;
+    const gameValid = fields[3].value === "" || /^[a-z0-9][a-z0-9_-]{0,63}$/.test(fields[3].value);
+    fields[3].setAttribute("aria-invalid", String(!gameValid));
+    setText("game-error", gameValid ? "" : "게임 ID는 소문자 영문·숫자로 시작하고 소문자 영문·숫자·_·- 64자까지 입력하세요.");
+    return valid && gameValid;
   }
   function describeQuery(q) {
-    return `룸 번호 ${q.number_prefix ? `${q.number_prefix}로 시작` : "전체"} · 상태 ${q.phase === "all" ? "전체" : q.phase === "WAITING" ? "대기" : "게임 중"} · 공개 여부 ${q.visibility === "all" ? "전체" : q.visibility === "public" ? "공개" : "비공개"}`;
+    return `게임 ${q.game_id || "전체"} · 룸 번호 ${q.number_prefix ? `${q.number_prefix}로 시작` : "전체"} · 상태 ${q.phase === "all" ? "전체" : q.phase === "WAITING" ? "대기" : "게임 중"} · 공개 여부 ${q.visibility === "all" ? "전체" : q.visibility === "public" ? "공개" : "비공개"}`;
   }
   function cancelCycle() {
     generation += 1;
@@ -66,7 +69,7 @@
   }
   function validateRooms(data) {
     return common(data) && ["total", "matched_total", "offset", "limit"].every((key) => integer(data[key])) && data.limit === 100 && data.matched_total <= data.total && Array.isArray(data.rooms) && data.rooms.length <= data.limit
-      && data.rooms.every((room) => room && ["room_id", "room_number", "host_id"].every((key) => typeof room[key] === "string") && ["public", "private"].includes(room.visibility) && ["WAITING", "PLAYING"].includes(room.phase) && integer(room.capacity) && integer(room.member_count) && (room.match_id === null || typeof room.match_id === "string") && timestamp(room.updated_at) && integer(room.age_ms) && typeof room.stale === "boolean");
+      && data.rooms.every((room) => room && typeof room.game_id === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(room.game_id) && ["room_id", "room_number", "host_id"].every((key) => typeof room[key] === "string") && ["public", "private"].includes(room.visibility) && ["WAITING", "PLAYING"].includes(room.phase) && integer(room.capacity) && integer(room.member_count) && (room.match_id === null || typeof room.match_id === "string") && timestamp(room.updated_at) && integer(room.age_ms) && typeof room.stale === "boolean");
   }
   async function readJSON(url, signal, validate) {
     const response = await fetch(url, {mode: "same-origin", credentials: "same-origin", cache: "no-store", signal});
@@ -101,6 +104,7 @@
     rowFreshness.length = 0;
     for (const room of value.rooms) {
       const row = document.createElement("tr");
+      cell(row, room.game_id);
       cell(row, room.room_number, "", true);
       cell(row, room.visibility === "public" ? "공개" : "비공개");
       const phase = cell(row, "");
@@ -120,7 +124,7 @@
   function updateDisplayedQuery() {
     if (!roomsData) return;
     const q = roomsData.query;
-    const different = ["number_prefix", "phase", "visibility", "offset"].some((key) => q[key] !== query()[key]);
+    const different = ["game_id", "number_prefix", "phase", "visibility", "offset"].some((key) => q[key] !== query()[key]);
     setText("displayed-query", `${different ? "이전 조회 결과를 표시합니다. " : "표시 중인 조회: "}${describeQuery(q)} · ${numberFormat.format(roomsData.value.offset)}부터`);
   }
   function updateControls() {
@@ -136,7 +140,7 @@
     statusData = null; roomsData = null; rowFreshness.length = 0;
     $("room-rows").replaceChildren();
     ["connections", "members", "room-count", "waiting-count", "playing-count"].forEach((id) => setText(id, "—"));
-    ["server-identity", "status-error", "rooms-error", "displayed-query", "number-error"].forEach((id) => setText(id, ""));
+    ["server-identity", "status-error", "rooms-error", "displayed-query", "number-error", "game-error"].forEach((id) => setText(id, ""));
     setText("server-status", "운영 인증이 필요합니다.");
     setText("status-freshness", "서버 요약 갱신 시각: —"); setText("rooms-freshness", "룸 목록 갱신 시각: —");
     setText("rooms-count", "전체 —개 · 조건에 맞는 룸 —개"); setText("rooms-message", "운영 인증이 필요합니다."); setText("page-info", "표시 범위 —");
@@ -201,7 +205,8 @@
     if (!active) void cycle();
   }
   fields[0].addEventListener("input", filtersChanged);
-  fields.slice(1).forEach((field) => field.addEventListener("change", filtersChanged));
+  fields[3].addEventListener("input", filtersChanged);
+  fields.slice(1, 3).forEach((field) => field.addEventListener("change", filtersChanged));
   refreshControl.addEventListener("click", () => { if (!active && !locked) void cycle(); });
   automaticControl.addEventListener("change", () => {
     automatic = automaticControl.checked;
@@ -209,14 +214,14 @@
     if (automatic) { visibleResumed = false; resumeAutomaticCycle(); }
   });
   $("clear-filters").addEventListener("click", () => {
-    fields[0].value = ""; fields[1].value = "all"; fields[2].value = "all"; filtersChanged();
+    fields[0].value = ""; fields[1].value = "all"; fields[2].value = "all"; fields[3].value = ""; filtersChanged();
   });
   function page(direction) {
     if (!roomsData || active || locked) return;
     const value = roomsData.value, previousQuery = roomsData.query;
     const target = value.offset + direction * 100;
     if (target < 0 || target > 4096 || direction > 0 && target >= value.matched_total) return;
-    fields[0].value = previousQuery.number_prefix; fields[1].value = previousQuery.phase; fields[2].value = previousQuery.visibility;
+    fields[0].value = previousQuery.number_prefix; fields[1].value = previousQuery.phase; fields[2].value = previousQuery.visibility; fields[3].value = previousQuery.game_id || "";
     offset = target; void cycle();
   }
   $("previous").addEventListener("click", () => page(-1));

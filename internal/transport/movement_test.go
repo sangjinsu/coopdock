@@ -588,7 +588,7 @@ func TestSlowSnapshotReaderIsolation(t *testing.T) {
 		t.Fatal("reliable overflow affected healthy peer")
 	}
 	// Disconnect cleanup must remove only the saturated peer's room.
-	rooms, e := m.ListPublic(context.Background())
+	rooms, e := listForTest(t, m, context.Background())
 	if e != nil || len(rooms) != 1 || rooms[0].RoomID != ov.RoomID {
 		t.Fatal("slow peer membership cleanup")
 	}
@@ -815,7 +815,7 @@ func TestWireRestartPreservesOldTerminal(t *testing.T) {
 	close(end)
 	timeout := time.Now().Add(time.Second)
 	for {
-		rooms, err := m.ListPublic(context.Background())
+		rooms, err := listForTest(t, m, context.Background())
 		if err != nil {
 			close(release)
 			t.Fatal(err)

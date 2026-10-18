@@ -88,6 +88,15 @@ func (s *Server) LiveStatus() (activeConnections int, stopping bool) {
 	return s.activeConnections, s.closing
 }
 func (s *Server) accept(w http.ResponseWriter, r *http.Request) {
+	gameID, status := s.selectGame(r.URL.RawQuery)
+	if status != 0 {
+		message := "Invalid game selection."
+		if status == http.StatusNotFound {
+			message = "Game was not found."
+		}
+		http.Error(w, message, status)
+		return
+	}
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
@@ -102,7 +111,7 @@ func (s *Server) accept(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		ip = r.RemoteAddr
 	}
-	session, e := s.manager.Connect(ip)
+	session, e := s.manager.ConnectGame(ip, gameID)
 	if e != nil {
 		http.Error(w, "Server is unavailable.", http.StatusServiceUnavailable)
 		return
@@ -394,7 +403,7 @@ func (p *peer) processSnapshot() {
 }
 func (p *peer) processor() {
 	defer p.stop()
-	if !p.enqueue(protocol.Event("session.guest", map[string]string{"session_id": p.session.ID()})) {
+	if !p.enqueue(protocol.Event("session.guest", map[string]string{"session_id": p.session.ID(), "game_id": p.session.GameID()})) {
 		return
 	}
 	for {
@@ -442,7 +451,7 @@ func (p *peer) processor() {
 				payload = map[string]any{"snapshot": state}
 			case "room.list":
 				var rooms []room.Snapshot
-				rooms, e = p.server.manager.ListPublic(ctx)
+				rooms, e = p.server.manager.ListPublic(ctx, p.session)
 				payload = map[string]any{"rooms": rooms}
 			case "room.leave":
 				e = p.server.manager.Leave(ctx, p.session)
@@ -532,4 +541,34 @@ func validOrigin(v string) bool {
 		}
 	}
 	return true
+}
+
+func (s *Server) selectGame(raw string) (string, int) {
+	if len(raw) > 1024 {
+		return "", http.StatusBadRequest
+	}
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return "", http.StatusBadRequest
+	}
+	for key, all := range values {
+		if key != "game_id" || len(all) != 1 {
+			return "", http.StatusBadRequest
+		}
+	}
+	all, ok := values["game_id"]
+	if !ok {
+		if s.manager.LegacyDefault() {
+			return "default", 0
+		}
+		return "", http.StatusBadRequest
+	}
+	id := all[0]
+	if !room.ValidGameID(id) {
+		return "", http.StatusBadRequest
+	}
+	if !s.manager.HasGame(id) {
+		return "", http.StatusNotFound
+	}
+	return id, 0
 }

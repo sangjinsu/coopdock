@@ -42,7 +42,7 @@ func TestOperationsSummaryClone(t *testing.T) {
 
 func TestOperationsPublishDoesNotCapture(t *testing.T) {
 	m := setup(t, DefaultConfig())
-	r := newActor(m, "001284", CreateOptions{Capacity: 6, Visibility: "private"}, nil)
+	r := newActor(m, "default", "001284", CreateOptions{Capacity: 6, Visibility: "private"}, nil)
 	r.revision, r.snapshotSeq = 7, 13
 	now := time.Now()
 	r.publishOperations(now)
@@ -56,7 +56,7 @@ func TestOperationsPublishDoesNotCapture(t *testing.T) {
 }
 
 func TestOperationsPublishedPrivateAllowlist(t *testing.T) {
-	wantFields := []string{"RoomID", "RoomNumber", "Visibility", "Phase", "Capacity", "MemberCount", "HostID", "MatchID", "UpdatedAt"}
+	wantFields := []string{"GameID", "RoomID", "RoomNumber", "Visibility", "Phase", "Capacity", "MemberCount", "HostID", "MatchID", "UpdatedAt"}
 	typ := reflect.TypeOf(OperationsSummary{})
 	fields := make([]string, typ.NumField())
 	for i := range fields {
@@ -112,7 +112,7 @@ func TestOperationsPublishedPrivateAllowlist(t *testing.T) {
 			t.Fatalf("unexpected room: %+v", r)
 		}
 	}
-	listed, err := m.ListPublic(context.Background())
+	listed, err := listForTest(t, m, context.Background())
 	if err != nil || len(listed) != 1 || listed[0].RoomID != public.RoomID {
 		t.Fatalf("private room leaked into public list: %+v, %v", listed, err)
 	}
@@ -185,7 +185,7 @@ func TestOperationsHeartbeatIndependent(t *testing.T) {
 	awaitOperations(t, m, func(v OperationsSnapshot) bool {
 		return len(v.Rooms) == 1 && v.Rooms[0].Phase == "WAITING" && v.Rooms[0].UpdatedAt == time.Unix(101, 0)
 	})
-	listed, err := m.ListPublic(context.Background())
+	listed, err := listForTest(t, m, context.Background())
 	if err != nil || len(listed) != 1 || listed[0].Revision != created.Revision || listed[0].SnapshotSeq != created.SnapshotSeq+2 {
 		t.Fatalf("waiting heartbeat captured game state: %+v, %v", listed, err)
 	}
@@ -255,7 +255,7 @@ func TestOperationsHeartbeatBlockedActor(t *testing.T) {
 	created := create(t, m, host, CreateOptions{Capacity: 1})
 	started := startMatch(t, m, host)
 	m.mu.Lock()
-	r := m.rooms[created.RoomNumber]
+	r := m.rooms[roomKey{"default", created.RoomNumber}]
 	m.mu.Unlock()
 	clock.ticks <- time.Unix(1, 0)
 	select {
@@ -285,7 +285,7 @@ func TestOperationsRegistryReuseAndClone(t *testing.T) {
 	host := connect(t, m, "host")
 	old := create(t, m, host, CreateOptions{Capacity: 1})
 	m.mu.Lock()
-	oldActor := m.rooms[old.RoomNumber]
+	oldActor := m.rooms[roomKey{"default", old.RoomNumber}]
 	m.mu.Unlock()
 	if err := m.Leave(context.Background(), host); err != nil {
 		t.Fatal(err)

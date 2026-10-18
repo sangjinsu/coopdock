@@ -18,6 +18,7 @@ type Member struct {
 	SessionID string `json:"session_id"`
 }
 type Snapshot struct {
+	GameID                string            `json:"game_id"`
 	RoomID                string            `json:"room_id"`
 	RoomNumber            string            `json:"room_number"`
 	Visibility            string            `json:"visibility"`
@@ -52,6 +53,7 @@ func (v Snapshot) clone() Snapshot {
 }
 
 type Config struct {
+	GameIDs                                                               []string
 	TickHz, SnapshotHz, InputQueue, InputsPerTick                         int
 	HandlerFactory                                                        func() game.GameHandler
 	newTicker                                                             func(time.Duration) (<-chan time.Time, func())
@@ -76,7 +78,7 @@ type Config struct {
 }
 
 func DefaultConfig() Config {
-	return Config{TickHz: 30, SnapshotHz: 15, InputQueue: 256, InputsPerTick: 64, HandlerFactory: game.NewMovement, MaxRooms: 128, MaxSessions: 768, NumberRetries: 64, ActorQueue: 64, CleanupQueue: 6, EventQueue: 64, ListLimit: 100, HashWorkers: 2, HashQueue: 8, FailureTTL: time.Minute, IPFailureLimit: 20, SessionFailureLimit: 5, RoomFailureLimit: 30, MaxFailureKeys: 4096, RequestTimeout: 5 * time.Second, ShutdownTimeout: 10 * time.Second, ArgonMemory: 19456, ArgonTime: 2, ArgonThreads: 1, SaltBytes: 16, HashBytes: 32}
+	return Config{GameIDs: []string{"default"}, TickHz: 30, SnapshotHz: 15, InputQueue: 256, InputsPerTick: 64, HandlerFactory: game.NewMovement, MaxRooms: 128, MaxSessions: 768, NumberRetries: 64, ActorQueue: 64, CleanupQueue: 6, EventQueue: 64, ListLimit: 100, HashWorkers: 2, HashQueue: 8, FailureTTL: time.Minute, IPFailureLimit: 20, SessionFailureLimit: 5, RoomFailureLimit: 30, MaxFailureKeys: 4096, RequestTimeout: 5 * time.Second, ShutdownTimeout: 10 * time.Second, ArgonMemory: 19456, ArgonTime: 2, ArgonThreads: 1, SaltBytes: 16, HashBytes: 32}
 }
 
 const MaxInputSeq uint64 = 9007199254740991

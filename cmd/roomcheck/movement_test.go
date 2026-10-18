@@ -34,7 +34,7 @@ func TestMovementChecker(t *testing.T) {
 	// Closed clients must remove their memberships and the final empty room.
 	deadline := time.Now().Add(time.Second)
 	for {
-		rooms, e := m.ListPublic(ctx)
+		rooms, e := listForTest(t, m, ctx)
 		if e != nil {
 			t.Fatal(e)
 		}

@@ -95,7 +95,7 @@ func TestPrivateAdmission(t *testing.T) {
 		_, e := m.Join(context.Background(), g, tt.o)
 		code(t, e, tt.w)
 	}
-	ls, e := m.ListPublic(context.Background())
+	ls, e := listForTest(t, m, context.Background())
 	if e != nil || len(ls) != 0 {
 		t.Fatal(ls, e)
 	}
@@ -146,7 +146,7 @@ func TestRequestDeadlineDuringHashCannotReplaceRejoin(t *testing.T) {
 	if _, err := m.Join(context.Background(), connect(t, m, "probe"), JoinOptions{RoomNumber: private.RoomNumber, Password: str("abcd")}); err != nil {
 		t.Fatal("worker did not finish the late hash before processing the next join", err)
 	}
-	rooms, err := m.ListPublic(context.Background())
+	rooms, err := listForTest(t, m, context.Background())
 	if err != nil || len(rooms) != 1 {
 		t.Fatal(rooms, err)
 	}
@@ -176,7 +176,7 @@ func TestHostSuccessionAndEmptyRemoval(t *testing.T) {
 	if e := m.Leave(context.Background(), h); e != nil {
 		t.Fatal(e)
 	}
-	ls, _ := m.ListPublic(context.Background())
+	ls, _ := listForTest(t, m, context.Background())
 	if len(ls) != 1 || ls[0].HostID != a.ID() {
 		t.Fatal(ls)
 	}
@@ -212,7 +212,7 @@ func TestLastSeatConcurrentJoin(t *testing.T) {
 	if counts[""] != 1 || counts["ROOM_FULL"] != 1 {
 		t.Fatal(counts)
 	}
-	ls, _ := m.ListPublic(context.Background())
+	ls, _ := listForTest(t, m, context.Background())
 	if len(ls[0].Members) != 6 {
 		t.Fatal(ls)
 	}
@@ -286,14 +286,14 @@ func TestUnpublishedCreateCannotBeListedOrJoined(t *testing.T) {
 			close(release)
 		}
 	})
-	ls, e := m.ListPublic(context.Background())
+	ls, e := listForTest(t, m, context.Background())
 	if e != nil || len(ls) != 0 {
 		t.Errorf("unpublished room visible: %v %v", ls, e)
 	}
 	m.mu.Lock()
 	var number string
 	for n := range m.rooms {
-		number = n
+		number = n.number
 	}
 	m.mu.Unlock()
 	_, e = m.Join(context.Background(), connect(t, m, "g"), JoinOptions{RoomNumber: number})
@@ -341,7 +341,7 @@ func TestTimeoutAfterCommitCleansBeforeRejoin(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	ls, _ := m.ListPublic(context.Background())
+	ls, _ := listForTest(t, m, context.Background())
 	for _, r := range ls {
 		if r.RoomID == a.RoomID && len(r.Members) != 1 {
 			t.Fatal(ls)
@@ -360,7 +360,7 @@ func TestEventOverflowCleansActorWithoutDeadlock(t *testing.T) {
 		t.Fatal(e)
 	}
 	await(t, h.Done())
-	ls, e := m.ListPublic(context.Background())
+	ls, e := listForTest(t, m, context.Background())
 	if e != nil || len(ls) != 0 {
 		t.Fatal(ls, e)
 	}
@@ -450,7 +450,7 @@ func TestCanceledCommittedJoinCannotRemoveRejoin(t *testing.T) {
 	}
 	close(releaseCancel)
 	code(t, awaitErr(t, old), "REQUEST_TIMEOUT")
-	rooms, err := m.ListPublic(context.Background())
+	rooms, err := listForTest(t, m, context.Background())
 	if err != nil || len(rooms) != 1 {
 		t.Fatal(err, rooms)
 	}
@@ -466,4 +466,20 @@ func TestCanceledCommittedJoinCannotRemoveRejoin(t *testing.T) {
 	if guest.room != currentRoom || guest.generation != generation || guest.membershipToken != token {
 		t.Fatal("stale cleanup changed current session membership")
 	}
+}
+
+func listForTest(t *testing.T, m *Manager, ctx context.Context) ([]Snapshot, error) {
+	t.Helper()
+	m.mu.Lock()
+	var observer *Session
+	for _, s := range m.sessions {
+		observer = s
+		break
+	}
+	m.mu.Unlock()
+	if observer == nil {
+		observer = connect(t, m, "test-list")
+		defer m.Disconnect(observer)
+	}
+	return m.ListPublic(ctx, observer)
 }

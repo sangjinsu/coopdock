@@ -185,6 +185,9 @@ func (c *Collector) collect(ctx context.Context, source Source, cfg Config, iden
 			ActiveConnections: connections, StartedAt: started, UpdatedAt: cfg.now(), Generation: generation,
 			HeapAllocBytes: sample.heapAllocBytes, Goroutines: sample.goroutines, rooms: cloneRooms(rooms.Rooms)}
 		sort.Slice(v.rooms, func(i, j int) bool {
+			if v.rooms[i].GameID != v.rooms[j].GameID {
+				return v.rooms[i].GameID < v.rooms[j].GameID
+			}
 			if v.rooms[i].RoomNumber == v.rooms[j].RoomNumber {
 				return v.rooms[i].RoomID < v.rooms[j].RoomID
 			}

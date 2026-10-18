@@ -161,7 +161,7 @@ func TestNumberReuseBindsRoomID(t *testing.T) {
 	}
 	close(b.release)
 	code(t, awaitErr(t, res), "ROOM_CLOSED")
-	ls, _ := m.ListPublic(context.Background())
+	ls, _ := listForTest(t, m, context.Background())
 	if len(ls) != 1 || len(ls[0].Members) != 1 {
 		t.Fatal(ls)
 	}

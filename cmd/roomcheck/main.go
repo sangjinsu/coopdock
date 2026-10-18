@@ -25,10 +25,13 @@ type checkClient struct {
 	conn      *websocket.Conn
 	sequence  int
 	sessionID string
+	gameID    string
 }
 
 func main() {
 	url := flag.String("url", "ws://127.0.0.1:8080/ws", "검증할 WebSocket URL")
+	gameID := flag.String("game-id", "default", "검증할 게임 ID")
+	otherGameID := flag.String("other-game-id", "", "교차 격리를 검증할 다른 게임 ID")
 	runs := flag.Int("race-runs", 3, "마지막 자리 동시 입장 반복 횟수 (1~100)")
 	timeout := flag.Duration("timeout", 30*time.Second, "전체 검증 제한 시간")
 	movement := flag.Bool("movement", true, "6클라이언트 실시간 이동 검증")
@@ -37,38 +40,55 @@ func main() {
 		fmt.Fprintln(os.Stderr, "검증 옵션이 잘못되었습니다.")
 		os.Exit(1)
 	}
+	endpoint, err := checkerURL(*url, *gameID)
+	if err != nil || *otherGameID != "" && (!room.ValidGameID(*otherGameID) || *otherGameID == *gameID) {
+		fmt.Fprintln(os.Stderr, "검증 URL 또는 게임 ID가 잘못되었습니다.")
+		os.Exit(1)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
-	if e := runChecks(ctx, *url, *runs); e != nil {
+	if e := runChecks(ctx, endpoint, *runs); e != nil {
 		fmt.Fprintln(os.Stderr, "검증 실패:", e)
 		os.Exit(1)
 	}
 	fmt.Printf("PASS: public/private 6인·7번째 거절, private 비밀번호 순서·목록 제외, 마지막 자리 race %d회\n", *runs)
 	if *movement {
-		if e := runMovementChecks(ctx, *url); e != nil {
+		if e := runMovementChecks(ctx, endpoint); e != nil {
 			fmt.Fprintln(os.Stderr, "이동 검증 실패:", e)
 			os.Exit(1)
 		}
 		fmt.Println("PASS: 6 WS 동일 capture·3D 이동·실제 ACK·정지 유지·빈 룸 정리")
 	}
+	if *otherGameID != "" {
+		if err := runNamespaceChecks(ctx, *url, *gameID, *otherGameID); err != nil {
+			fmt.Fprintln(os.Stderr, "게임 격리 검증 실패:", err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS: 두 게임 guest·목록·교차 입장·override·이동/정지·host 승계·정리 격리")
+	}
 }
 func connect(ctx context.Context, url string) (*checkClient, error) {
+	expected, e := expectedGame(url)
+	if e != nil {
+		return nil, e
+	}
 	c, _, e := websocket.Dial(ctx, url, nil)
 	if e != nil {
 		return nil, errors.New("WebSocket 연결 실패.")
 	}
-	v := &checkClient{conn: c}
+	v := &checkClient{conn: c, gameID: expected}
 	r, e := v.read(ctx)
 	if e != nil || r.Op != "session.guest" || r.ID != nil || r.Error != nil {
 		c.CloseNow()
 		return nil, errors.New("guest 발급 검증 실패.")
 	}
 	var p struct {
-		ID string `json:"session_id"`
+		ID     string `json:"session_id"`
+		GameID string `json:"game_id"`
 	}
-	if json.Unmarshal(r.Payload, &p) != nil || p.ID == "" {
+	if json.Unmarshal(r.Payload, &p) != nil || p.ID == "" || p.GameID != expected {
 		c.CloseNow()
-		return nil, errors.New("guest ID 없음.")
+		return nil, errors.New("guest ID 또는 game_id 바인딩 불일치.")
 	}
 	v.sessionID = p.ID
 	return v, nil
@@ -91,6 +111,9 @@ func (c *checkClient) read(ctx context.Context) (reply, error) {
 		if hasKey(r.Payload, k) {
 			return r, errors.New("비밀정보 필드 노출.")
 		}
+	}
+	if e := c.validateBinding(r); e != nil {
+		return r, e
 	}
 	return r, nil
 }
@@ -140,7 +163,9 @@ func (c *checkClient) request(ctx context.Context, op string, p any) (reply, err
 			}
 			return r, nil
 		}
-		if r.Op != "room.state" {
+		switch r.Op {
+		case "room.state", "game.snapshot", "game.started", "game.ended", "game.event":
+		default:
 			return r, errors.New("예상하지 않은 이벤트.")
 		}
 	}

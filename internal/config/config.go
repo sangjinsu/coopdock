@@ -25,6 +25,22 @@ func Load() (Config, error) {
 	if e := c.Admin.Validate(); e != nil {
 		return c, e
 	}
+	if raw, ok := os.LookupEnv("GAME_IDS"); ok {
+		ids := strings.Split(raw, ",")
+		seen := map[string]bool{}
+		if len(ids) < 1 || len(ids) > 32 {
+			return c, fmt.Errorf("Invalid GAME_IDS.")
+		}
+		for i, id := range ids {
+			id = strings.TrimSpace(id)
+			if !room.ValidGameID(id) || seen[id] {
+				return c, fmt.Errorf("Invalid GAME_IDS.")
+			}
+			seen[id] = true
+			ids[i] = id
+		}
+		c.Room.GameIDs = ids
+	}
 	if v, ok := os.LookupEnv("HTTP_ADDR"); ok {
 		c.Address = v
 	}

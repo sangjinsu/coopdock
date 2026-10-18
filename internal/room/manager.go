@@ -11,12 +11,15 @@ import (
 	"time"
 )
 
+type roomKey struct{ gameID, number string }
+
 type Manager struct {
 	cfg Config
 	// The admission gate is always acquired before a session lock.
 	mu        sync.Mutex
 	closing   bool
-	rooms     map[string]*actor
+	rooms     map[roomKey]*actor
+	games     map[string]struct{}
 	sessions  map[string]*Session
 	wg        sync.WaitGroup
 	closeOnce sync.Once
@@ -30,6 +33,20 @@ func NewManager(c Config) (*Manager, error) {
 	if c.TickHz < 1 || c.TickHz > 120 || c.SnapshotHz < 1 || c.SnapshotHz > c.TickHz || c.InputQueue < 1 || c.InputQueue > 4096 || c.InputsPerTick < 1 || c.InputsPerTick > c.InputQueue || c.MaxRooms < 1 || c.MaxRooms > 4096 || c.MaxSessions < 1 || c.NumberRetries < 1 || c.ActorQueue < 1 || c.CleanupQueue < 6 || c.EventQueue < 1 || c.ListLimit < 1 || c.HashWorkers < 1 || c.HashQueue < 1 || c.FailureTTL <= 0 || c.IPFailureLimit < 1 || c.SessionFailureLimit < 1 || c.RoomFailureLimit < 1 || c.MaxFailureKeys < 3 || c.RequestTimeout <= 0 || c.ShutdownTimeout <= 0 || c.ArgonThreads < 1 || c.ArgonMemory < 8*uint32(c.ArgonThreads) || c.ArgonTime < 1 || c.SaltBytes < 16 || c.HashBytes < 32 {
 		return nil, failure("INVALID_MESSAGE")
 	}
+	games := make(map[string]struct{}, len(c.GameIDs))
+	if len(c.GameIDs) < 1 || len(c.GameIDs) > 32 {
+		return nil, failure("INVALID_MESSAGE")
+	}
+	for _, id := range c.GameIDs {
+		if !ValidGameID(id) {
+			return nil, failure("INVALID_MESSAGE")
+		}
+		if _, exists := games[id]; exists {
+			return nil, failure("INVALID_MESSAGE")
+		}
+		games[id] = struct{}{}
+	}
+	c.GameIDs = append([]string(nil), c.GameIDs...)
 	if c.HandlerFactory == nil {
 		c.HandlerFactory = game.NewMovement
 	}
@@ -42,15 +59,19 @@ func NewManager(c Config) (*Manager, error) {
 	if c.operationsNow == nil {
 		c.operationsNow = time.Now
 	}
-	m := &Manager{cfg: c, rooms: map[string]*actor{}, sessions: map[string]*Session{}, closed: make(chan struct{}), stop: make(chan struct{}), hashJobs: make(chan hashJob, c.HashQueue), limits: newFailureLimits(c)}
+	m := &Manager{cfg: c, rooms: map[roomKey]*actor{}, games: games, sessions: map[string]*Session{}, closed: make(chan struct{}), stop: make(chan struct{}), hashJobs: make(chan hashJob, c.HashQueue), limits: newFailureLimits(c)}
 	for i := 0; i < c.HashWorkers; i++ {
 		m.wg.Add(1)
 		go m.hashWorker()
 	}
 	return m, nil
 }
-func (m *Manager) Ready() bool { m.mu.Lock(); defer m.mu.Unlock(); return !m.closing }
-func (m *Manager) Connect(peer string) (*Session, error) {
+func (m *Manager) Ready() bool                           { m.mu.Lock(); defer m.mu.Unlock(); return !m.closing }
+func (m *Manager) Connect(peer string) (*Session, error) { return m.ConnectGame(peer, "default") }
+func (m *Manager) ConnectGame(peer, gameID string) (*Session, error) {
+	if !m.HasGame(gameID) {
+		return nil, failure("INVALID_MESSAGE")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closing {
@@ -59,7 +80,7 @@ func (m *Manager) Connect(peer string) (*Session, error) {
 	if len(m.sessions) >= m.cfg.MaxSessions {
 		return nil, failure("SERVER_BUSY")
 	}
-	s := &Session{manager: m, id: rand.Text(), peer: peer, done: make(chan struct{}), events: make(chan Event, m.cfg.EventQueue), snapshotReady: make(chan struct{}, 1)}
+	s := &Session{manager: m, id: rand.Text(), peer: peer, gameID: gameID, done: make(chan struct{}), events: make(chan Event, m.cfg.EventQueue), snapshotReady: make(chan struct{}, 1)}
 	m.sessions[s.id] = s
 	return s, nil
 }
@@ -195,7 +216,7 @@ func (m *Manager) Create(ctx context.Context, s *Session, o CreateOptions) (Snap
 		if e != nil {
 			break
 		}
-		if m.rooms[n] == nil {
+		if m.rooms[roomKey{s.gameID, n}] == nil {
 			break
 		}
 		n = ""
@@ -205,8 +226,8 @@ func (m *Manager) Create(ctx context.Context, s *Session, o CreateOptions) (Snap
 		m.cancel(s, g)
 		return Snapshot{}, failure("SERVER_BUSY")
 	}
-	r := newActor(m, n, o, p)
-	m.rooms[n] = r
+	r := newActor(m, s.gameID, n, o, p)
+	m.rooms[roomKey{s.gameID, n}] = r
 	m.wg.Add(1)
 	go r.run()
 	m.mu.Unlock()
@@ -251,8 +272,8 @@ func (m *Manager) Join(ctx context.Context, s *Session, o JoinOptions) (Snapshot
 		return Snapshot{}, e
 	}
 	m.mu.Lock()
-	r := m.rooms[o.RoomNumber]
-	if r != nil && !r.published {
+	r := m.rooms[roomKey{s.gameID, o.RoomNumber}]
+	if r != nil && (!r.published || r.gameID != s.gameID) {
 		r = nil
 	}
 	m.mu.Unlock()
@@ -292,7 +313,7 @@ func (m *Manager) Leave(ctx context.Context, s *Session) error {
 		return failure("SESSION_CLOSED")
 	}
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || m.sessions[s.id] != s {
 		s.mu.Unlock()
 		m.mu.Unlock()
 		return failure("SESSION_CLOSED")
@@ -301,9 +322,14 @@ func (m *Manager) Leave(ctx context.Context, s *Session) error {
 	token := s.membershipToken
 	s.generation++
 	s.joining = false
+	if r == nil || r.gameID != s.gameID || m.rooms[roomKey{r.gameID, r.number}] != r {
+		s.mu.Unlock()
+		m.mu.Unlock()
+		return failure("NOT_IN_ROOM")
+	}
 	s.mu.Unlock()
 	m.mu.Unlock()
-	if r == nil {
+	if r == nil || r.gameID != s.gameID {
 		return failure("NOT_IN_ROOM")
 	}
 	r.cleanup(s, token)
@@ -316,6 +342,11 @@ func (m *Manager) Disconnect(s *Session) {
 		return
 	}
 	s.mu.Lock()
+	if m.sessions[s.id] != s {
+		s.mu.Unlock()
+		m.mu.Unlock()
+		return
+	}
 	if !s.closed {
 		s.closed = true
 		s.generation++
@@ -327,18 +358,22 @@ func (m *Manager) Disconnect(s *Session) {
 	token := s.membershipToken
 	s.mu.Unlock()
 	m.mu.Unlock()
-	if r != nil {
+	if r != nil && r.gameID == s.gameID {
 		r.cleanup(s, token)
 	}
 }
-func (m *Manager) ListPublic(ctx context.Context) ([]Snapshot, error) {
+func (m *Manager) ListPublic(ctx context.Context, s *Session) ([]Snapshot, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	m.mu.Lock()
+	if err := m.listSessionError(s); err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
 	rs := make([]*actor, 0, len(m.rooms))
 	for _, r := range m.rooms {
-		if r.published && r.visibility == "public" {
+		if r.gameID == s.gameID && r.published && r.visibility == "public" {
 			rs = append(rs, r)
 		}
 	}
@@ -348,7 +383,7 @@ func (m *Manager) ListPublic(ctx context.Context) ([]Snapshot, error) {
 	for _, r := range rs {
 		res := make(chan result, 1)
 		select {
-		case r.commands <- command{list: true, result: res}:
+		case r.commands <- command{s: s, list: true, result: res}:
 		case <-r.done:
 			continue
 		case <-ctx.Done():
@@ -360,6 +395,8 @@ func (m *Manager) ListPublic(ctx context.Context) ([]Snapshot, error) {
 		case v := <-res:
 			if v.err == nil {
 				out = append(out, v.snap)
+			} else if CodeOf(v.err) != "ROOM_CLOSED" {
+				return nil, v.err
 			}
 		case <-r.done:
 			continue
@@ -369,6 +406,12 @@ func (m *Manager) ListPublic(ctx context.Context) ([]Snapshot, error) {
 		if len(out) >= m.cfg.ListLimit {
 			break
 		}
+	}
+	m.mu.Lock()
+	err := m.listSessionError(s)
+	m.mu.Unlock()
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -407,3 +450,39 @@ func (m *Manager) Close(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
+
+// listSessionError requires the admission gate and preserves gate-before-session ordering.
+func (m *Manager) listSessionError(s *Session) error {
+	if s == nil || s.manager != m {
+		return failure("SESSION_CLOSED")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || m.sessions[s.id] != s {
+		return failure("SESSION_CLOSED")
+	}
+	if m.closing {
+		return failure("SERVER_CLOSING")
+	}
+	return nil
+}
+func (m *Manager) HasGame(gameID string) bool { _, ok := m.games[gameID]; return ok }
+func ValidGameID(gameID string) bool {
+	if len(gameID) < 1 || len(gameID) > 64 {
+		return false
+	}
+	for i := 0; i < len(gameID); i++ {
+		c := gameID[i]
+		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
+			continue
+		}
+		if i > 0 && (c == '_' || c == '-') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// LegacyDefault reports only the sole-default compatibility configuration.
+func (m *Manager) LegacyDefault() bool { return len(m.games) == 1 && m.HasGame("default") }

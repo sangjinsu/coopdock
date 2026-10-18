@@ -169,7 +169,7 @@ func assertKeys(t *testing.T, v map[string]any, keys string) {
 
 const statusKeys = "server_instance_id state ready active_connections room_member_count room_count waiting_room_count playing_room_count started_at uptime_seconds heap_alloc_bytes goroutines cpu_percent rtt_ms client_display_delay_ms updated_at age_ms stale generation"
 const roomsKeys = "total matched_total offset limit rooms updated_at age_ms stale generation"
-const rowKeys = "room_id room_number visibility phase capacity member_count host_id match_id updated_at age_ms stale"
+const rowKeys = "game_id room_id room_number visibility phase capacity member_count host_id match_id updated_at age_ms stale"
 
 func TestRoomsFiltersBeforePagination(t *testing.T) {
 	at := time.Date(2026, 10, 11, 12, 0, 0, 0, time.FixedZone("KST", 9*3600))

@@ -256,7 +256,7 @@ func TestDisconnectHostAndEmptyRoom(t *testing.T) {
 	g.c.CloseNow()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		ls, e := m.ListPublic(context.Background())
+		ls, e := listForTest(t, m, context.Background())
 		if e == nil && len(ls) == 0 {
 			return
 		}
@@ -399,7 +399,7 @@ func TestIngressOverflowDuringBlockedPrivateRequest(t *testing.T) {
 	}
 	waitDone(t, p.session.Done())
 	waitDone(t, p.ctx.Done())
-	ls, e := m.ListPublic(context.Background())
+	ls, e := listForTest(t, m, context.Background())
 	if e != nil || len(ls) != 0 {
 		t.Fatalf("private exposed %v %v", ls, e)
 	}
@@ -444,7 +444,7 @@ func TestSlowWriterOverflowCleansMembership(t *testing.T) {
 	waitDone(t, p.session.Done())
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		ls, e := m.ListPublic(context.Background())
+		ls, e := listForTest(t, m, context.Background())
 		if e == nil && len(ls) == 1 && len(ls[0].Members) == 1 {
 			h.success("room.list", map[string]any{})
 			return

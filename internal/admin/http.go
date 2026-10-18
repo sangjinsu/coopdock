@@ -130,6 +130,7 @@ type StatusResponse struct {
 	Generation               uint64              `json:"generation"`
 }
 type RoomResponse struct {
+	GameID      string  `json:"game_id"`
 	RoomID      string  `json:"room_id"`
 	RoomNumber  string  `json:"room_number"`
 	Visibility  string  `json:"visibility"`
@@ -156,6 +157,7 @@ type RoomsResponse struct {
 type roomsQuery struct {
 	Limit, Offset                   int
 	NumberPrefix, Phase, Visibility string
+	GameID                          string
 }
 
 func parseRoomsQuery(values url.Values) (roomsQuery, error) {
@@ -186,6 +188,11 @@ func parseRoomsQuery(values url.Values) (roomsQuery, error) {
 				}
 				q.Offset = n
 			}
+		case "game_id":
+			if !room.ValidGameID(value) {
+				return roomsQuery{}, invalid
+			}
+			q.GameID = value
 		case "number_prefix":
 			if len(value) > 6 || value != "" && !decimal(value) {
 				return roomsQuery{}, invalid
@@ -232,11 +239,14 @@ func roomsResponse(v observability.Snapshot, q roomsQuery, now time.Time) RoomsR
 	total := len(rows)
 	filtered := rows[:0]
 	for _, row := range rows {
-		if strings.HasPrefix(row.RoomNumber, q.NumberPrefix) && (q.Phase == "all" || q.Phase == row.Phase) && (q.Visibility == "all" || q.Visibility == row.Visibility) {
+		if (q.GameID == "" || row.GameID == q.GameID) && strings.HasPrefix(row.RoomNumber, q.NumberPrefix) && (q.Phase == "all" || q.Phase == row.Phase) && (q.Visibility == "all" || q.Visibility == row.Visibility) {
 			filtered = append(filtered, row)
 		}
 	}
 	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].GameID != filtered[j].GameID {
+			return filtered[i].GameID < filtered[j].GameID
+		}
 		if filtered[i].RoomNumber == filtered[j].RoomNumber {
 			return filtered[i].RoomID < filtered[j].RoomID
 		}
@@ -249,7 +259,7 @@ func roomsResponse(v observability.Snapshot, q roomsQuery, now time.Time) RoomsR
 	}
 	for _, row := range filtered[q.Offset:min(q.Offset+q.Limit, len(filtered))] {
 		age := observability.AgeMillis(now, row.UpdatedAt)
-		response.Rooms = append(response.Rooms, RoomResponse{RoomID: row.RoomID, RoomNumber: row.RoomNumber, Visibility: row.Visibility, Phase: row.Phase, Capacity: row.Capacity, MemberCount: row.MemberCount, HostID: row.HostID, MatchID: row.MatchID, UpdatedAt: timestamp(row.UpdatedAt), AgeMillis: age, Stale: age >= observability.StaleAfter.Milliseconds()})
+		response.Rooms = append(response.Rooms, RoomResponse{GameID: row.GameID, RoomID: row.RoomID, RoomNumber: row.RoomNumber, Visibility: row.Visibility, Phase: row.Phase, Capacity: row.Capacity, MemberCount: row.MemberCount, HostID: row.HostID, MatchID: row.MatchID, UpdatedAt: timestamp(row.UpdatedAt), AgeMillis: age, Stale: age >= observability.StaleAfter.Milliseconds()})
 	}
 	return response
 }

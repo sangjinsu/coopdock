@@ -6,6 +6,7 @@ import (
 )
 
 type OperationsSummary struct {
+	GameID                                string
 	RoomID, RoomNumber, Visibility, Phase string
 	Capacity, MemberCount                 int
 	HostID                                string
@@ -40,13 +41,22 @@ func (m *Manager) OperationsSnapshot() OperationsSnapshot {
 		seen[summary.RoomID] = struct{}{}
 		v.Rooms = append(v.Rooms, summary.clone())
 	}
-	sort.Slice(v.Rooms, func(i, j int) bool { return v.Rooms[i].RoomNumber < v.Rooms[j].RoomNumber })
+	sort.Slice(v.Rooms, func(i, j int) bool {
+		a, b := v.Rooms[i], v.Rooms[j]
+		if a.GameID != b.GameID {
+			return a.GameID < b.GameID
+		}
+		if a.RoomNumber != b.RoomNumber {
+			return a.RoomNumber < b.RoomNumber
+		}
+		return a.RoomID < b.RoomID
+	})
 	return v
 }
 
 // publishOperations reads actor-owned primitives without capturing game state.
 func (r *actor) publishOperations(now time.Time) {
-	v := OperationsSummary{RoomID: r.id, RoomNumber: r.number,
+	v := OperationsSummary{GameID: r.gameID, RoomID: r.id, RoomNumber: r.number,
 		Visibility: r.visibility, Phase: "WAITING", Capacity: r.capacity,
 		MemberCount: len(r.members), UpdatedAt: now}
 	if len(r.members) > 0 {

@@ -39,7 +39,7 @@ func (m *Manager) Start(ctx context.Context, s *Session) (Snapshot, error) {
 	}
 	r, token := s.room, s.membershipToken
 	s.mu.Unlock()
-	if r == nil || m.rooms[r.number] != r {
+	if r == nil || r.gameID != s.gameID || m.rooms[roomKey{r.gameID, r.number}] != r {
 		m.mu.Unlock()
 		return Snapshot{}, failure("NOT_IN_ROOM")
 	}
@@ -103,7 +103,7 @@ func (m *Manager) SubmitInput(ctx context.Context, s *Session, requestID string,
 		return failure("SESSION_CLOSED")
 	}
 	r := s.room
-	if r == nil || m.rooms[r.number] != r {
+	if r == nil || r.gameID != s.gameID || m.rooms[roomKey{r.gameID, r.number}] != r {
 		return failure("NOT_IN_ROOM")
 	}
 	if r.matchID == "" {
@@ -139,11 +139,11 @@ func (r *actor) startError(c command) error {
 	switch {
 	case m.closing:
 		return failure("SERVER_CLOSING")
-	case m.rooms[r.number] != r:
+	case m.rooms[roomKey{r.gameID, r.number}] != r:
 		return failure("ROOM_CLOSED")
 	case s.closed || m.sessions[s.id] != s:
 		return failure("SESSION_CLOSED")
-	case s.room != r || s.membershipToken != c.g:
+	case s.manager != m || s.gameID != r.gameID || s.room != r || s.membershipToken != c.g:
 		return failure("NOT_IN_ROOM")
 	case len(r.members) == 0 || r.members[0].session != s:
 		return failure("NOT_HOST")
@@ -215,7 +215,7 @@ func (r *actor) validateReceipt(in receipt, high map[*Session]uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer m.mu.Unlock()
-	if s.closed || m.sessions[s.id] != s || s.room != r || s.membershipToken != in.token || in.roomID != r.id {
+	if s.closed || s.manager != m || s.gameID != r.gameID || m.rooms[roomKey{r.gameID, r.number}] != r || m.sessions[s.id] != s || s.room != r || s.membershipToken != in.token || in.roomID != r.id {
 		return failure("INPUT_CANCELED")
 	}
 	if r.matchID == "" {

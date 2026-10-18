@@ -33,8 +33,10 @@ type cleanup struct {
 type actor struct {
 	manager                *Manager
 	id, number, visibility string
+	gameID                 string
 	capacity               int
 	published              bool
+	detached               bool // Protected by manager.mu; final cleanup follows index removal.
 	password               *credential
 	members                []memberEntry
 	revision, snapshotSeq  uint64
@@ -58,14 +60,14 @@ type actor struct {
 	stopOperations         func()
 }
 
-func newActor(m *Manager, n string, o CreateOptions, p *credential) *actor {
-	return &actor{manager: m, id: rand.Text(), number: n, visibility: o.Visibility, capacity: o.Capacity, password: p, commands: make(chan command, m.cfg.ActorQueue), cleanups: make(chan cleanup, m.cfg.CleanupQueue), done: make(chan struct{}), inputs: make(chan receipt, m.cfg.InputQueue), inputSlots: make(chan struct{}, m.cfg.InputQueue)}
+func newActor(m *Manager, gameID, n string, o CreateOptions, p *credential) *actor {
+	return &actor{manager: m, gameID: gameID, id: rand.Text(), number: n, visibility: o.Visibility, capacity: o.Capacity, password: p, commands: make(chan command, m.cfg.ActorQueue), cleanups: make(chan cleanup, m.cfg.CleanupQueue), done: make(chan struct{}), inputs: make(chan receipt, m.cfg.InputQueue), inputSlots: make(chan struct{}, m.cfg.InputQueue)}
 }
 
 // capture is actor-owned; handler state is cached outside the admission gate.
 func (r *actor) snapshot() Snapshot {
 	r.snapshotSeq++
-	v := Snapshot{RoomID: r.id, RoomNumber: r.number, Visibility: r.visibility, Capacity: r.capacity, Phase: "WAITING", Members: []Member{}, Revision: r.revision, SnapshotSeq: r.snapshotSeq, LastProcessedInputSeq: map[string]uint64{}}
+	v := Snapshot{GameID: r.gameID, RoomID: r.id, RoomNumber: r.number, Visibility: r.visibility, Capacity: r.capacity, Phase: "WAITING", Members: []Member{}, Revision: r.revision, SnapshotSeq: r.snapshotSeq, LastProcessedInputSeq: map[string]uint64{}}
 	if r.matchID != "" {
 		id := r.matchID
 		v.MatchID = &id
@@ -104,7 +106,7 @@ func (r *actor) remove(s *Session, roomID string, token uint64) bool {
 	m := r.manager
 	m.mu.Lock()
 	s.mu.Lock()
-	if roomID != r.id || token == 0 || s.room != r || s.membershipToken != token {
+	if (!r.detached && m.rooms[roomKey{r.gameID, r.number}] != r) || s.manager != m || s.gameID != r.gameID || roomID != r.id || token == 0 || s.room != r || s.membershipToken != token {
 		s.mu.Unlock()
 		m.mu.Unlock()
 		return false
@@ -164,7 +166,7 @@ func (r *actor) closeSlow(entry memberEntry) {
 	m := r.manager
 	m.mu.Lock()
 	s.mu.Lock()
-	if s.room != nil && (s.room != r || s.membershipToken != entry.token) {
+	if s.manager != m || s.gameID != r.gameID || s.room != nil && (s.room != r || s.membershipToken != entry.token) {
 		s.mu.Unlock()
 		m.mu.Unlock()
 		return
@@ -268,7 +270,9 @@ func (r *actor) admit(c command) result {
 	switch {
 	case m.closing:
 		err = failure("SERVER_CLOSING")
-	case m.rooms[r.number] != r:
+	case s.gameID != r.gameID:
+		err = failure("ROOM_NOT_FOUND")
+	case m.rooms[roomKey{r.gameID, r.number}] != r:
 		err = failure("ROOM_CLOSED")
 	case s.closed || s.manager != m || m.sessions[s.id] != s:
 		err = failure("SESSION_CLOSED")
@@ -305,7 +309,18 @@ func (r *actor) handleCleanup(c cleanup) {
 }
 func (r *actor) handleCommand(c command) {
 	if c.list {
-		c.result <- result{snap: r.snapshot()}
+		m := r.manager
+		m.mu.Lock()
+		err := m.listSessionError(c.s)
+		if err == nil && (c.s.gameID != r.gameID || m.rooms[roomKey{r.gameID, r.number}] != r) {
+			err = failure("ROOM_CLOSED")
+		}
+		m.mu.Unlock()
+		if err != nil {
+			c.result <- result{err: err}
+		} else {
+			c.result <- result{snap: r.snapshot()}
+		}
 		return
 	}
 	if c.start {
@@ -328,9 +343,10 @@ func (r *actor) run() {
 		// Registry removal and input admission share the gate, preventing orphan enqueue.
 		m := r.manager
 		m.mu.Lock()
-		if m.rooms[r.number] == r {
-			delete(m.rooms, r.number)
+		if m.rooms[roomKey{r.gameID, r.number}] == r {
+			delete(m.rooms, roomKey{r.gameID, r.number})
 		}
+		r.detached = true
 		m.mu.Unlock()
 		r.stopTickers()
 		r.cancelInputs(func(receipt) bool { return true })

@@ -5,6 +5,7 @@ import "sync"
 type Session struct {
 	manager    *Manager
 	id, peer   string
+	gameID     string
 	mu         sync.Mutex
 	generation uint64
 	// Membership identity survives reservation invalidation until its actor removes it.
@@ -18,6 +19,7 @@ type Session struct {
 	snapshotReady         chan struct{}
 }
 
+func (s *Session) GameID() string        { return s.gameID }
 func (s *Session) ID() string            { return s.id }
 func (s *Session) Done() <-chan struct{} { return s.done }
 func (s *Session) Events() <-chan Event  { return s.events }

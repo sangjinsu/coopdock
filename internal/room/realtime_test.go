@@ -279,7 +279,7 @@ func TestPlayingLeaveAndTickerShutdown(t *testing.T) {
 			if e := m.Leave(context.Background(), h); e != nil {
 				t.Fatal(e)
 			}
-			ls, e := m.ListPublic(context.Background())
+			ls, e := listForTest(t, m, context.Background())
 			if e != nil || len(ls) != 1 {
 				t.Fatal(ls, e)
 			}
@@ -305,9 +305,9 @@ func TestPlayingLeaveAndTickerShutdown(t *testing.T) {
 			if c.tickStops.Load() != 1 || c.snapshotStops.Load() != 1 {
 				t.Fatal("tickers did not stop exactly once")
 			}
-			ls, e = m.ListPublic(context.Background())
-			if e != nil || len(ls) != 0 {
-				t.Fatal("room survived final leave")
+			ls, e = m.ListPublic(context.Background(), g)
+			if CodeOf(e) != "SESSION_CLOSED" || len(ls) != 0 {
+				t.Fatal("closed session listed rooms", ls, e)
 			}
 			// Stopped ticker channels deliberately remain open.
 			c.ticks <- time.Now()
@@ -397,7 +397,7 @@ func TestInputCreditIncludesPendingFIFO(t *testing.T) {
 	submit(t, m, h, "one", move(v, 1, 1, 0))
 	submit(t, m, h, "two", move(v, 2, 0, 1))
 	// Listing is an actor barrier: both receipts may have moved to pending, but retain credit.
-	if _, err := m.ListPublic(context.Background()); err != nil {
+	if _, err := listForTest(t, m, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	code(t, m.SubmitInput(context.Background(), h, "overflow", move(v, 3, 0, 0)), "SERVER_BUSY")
@@ -505,7 +505,7 @@ func TestStartRechecksDeadlineAndDisconnect(t *testing.T) {
 				code(t, err, "REQUEST_TIMEOUT")
 				close(release)
 			}
-			ls, err := m.ListPublic(context.Background())
+			ls, err := listForTest(t, m, context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -538,7 +538,7 @@ func TestHandlerFailureDoesNotConsumeSequence(t *testing.T) {
 			if kind == "start" || kind == "nil" {
 				_, err := m.Start(context.Background(), h)
 				code(t, err, "GAME_ERROR")
-				ls, err := m.ListPublic(context.Background())
+				ls, err := listForTest(t, m, context.Background())
 				if err != nil || len(ls) != 1 || ls[0].Phase != "WAITING" || ls[0].MatchID != nil {
 					t.Fatal("failed start changed phase")
 				}
@@ -552,7 +552,7 @@ func TestHandlerFailureDoesNotConsumeSequence(t *testing.T) {
 			if e.Ack != nil {
 				t.Fatal("handler failure ACKed")
 			}
-			ls, err := m.ListPublic(context.Background())
+			ls, err := listForTest(t, m, context.Background())
 			if err != nil || len(ls) != 1 || ls[0].LastProcessedInputSeq[h.ID()] != 0 {
 				t.Fatal("handler failure consumed seq")
 			}
@@ -729,7 +729,7 @@ func TestTickOverflowPublishesAllAcksAndEventsBeforeLeaveEnd(t *testing.T) {
 	v := startMatch(t, m, h)
 	awaitGameEvent(t, g, "game.started")
 	// The actor/list barrier precedes filling A's real reliable FIFO, so no metadata remains in flight.
-	if _, err := m.ListPublic(context.Background()); err != nil {
+	if _, err := listForTest(t, m, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	for len(h.events) < cap(h.events) {
@@ -769,7 +769,7 @@ func TestTickOverflowPublishesAllAcksAndEventsBeforeLeaveEnd(t *testing.T) {
 		t.Fatal("overflow leave end did not stop tickers exactly once")
 	}
 	// The list barrier verifies returned credits and completed cleanup, without actor-private scheduling hooks.
-	if _, err := m.ListPublic(context.Background()); err != nil {
+	if _, err := listForTest(t, m, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	g.mu.Lock()
@@ -815,7 +815,7 @@ func TestLeaveOverflowPreservesOutcomeEvents(t *testing.T) {
 			startMatch(t, m, a)
 			awaitGameEvent(t, b, "game.started")
 			awaitGameEvent(t, c, "game.started")
-			if _, err := m.ListPublic(context.Background()); err != nil {
+			if _, err := listForTest(t, m, context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			for len(b.events) < cap(b.events) {
@@ -843,7 +843,7 @@ func TestLeaveOverflowPreservesOutcomeEvents(t *testing.T) {
 			if ended.Ended == nil || ended.Ended.Reason != wantReason {
 				t.Fatalf("original reason lost: %+v", ended.Ended)
 			}
-			rooms, err := m.ListPublic(context.Background())
+			rooms, err := listForTest(t, m, context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -895,7 +895,7 @@ func TestNestedLeaveOverflowPreservesPublication(t *testing.T) {
 	for _, s := range []*Session{b, c, d} {
 		awaitGameEvent(t, s, "game.started")
 	}
-	if _, err := m.ListPublic(context.Background()); err != nil {
+	if _, err := listForTest(t, m, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range []*Session{b, c} {
@@ -920,7 +920,7 @@ func TestNestedLeaveOverflowPreservesPublication(t *testing.T) {
 	if ended.Ended == nil || ended.Ended.Reason != "nested-left" {
 		t.Fatal("nested end reason lost")
 	}
-	rooms, err := m.ListPublic(context.Background())
+	rooms, err := listForTest(t, m, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -948,7 +948,7 @@ func TestLeaveCancellationOverflowClosesDepartedSession(t *testing.T) {
 	}
 	started := startMatch(t, m, a)
 	awaitGameEvent(t, b, "game.started")
-	if _, err := m.ListPublic(context.Background()); err != nil {
+	if _, err := listForTest(t, m, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	a.mu.Lock()

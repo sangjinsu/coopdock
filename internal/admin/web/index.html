@@ -31,16 +31,18 @@
     <section aria-labelledby="rooms-title">
       <div class="section-heading"><h2 id="rooms-title">룸 목록</h2><p id="rooms-count" class="secondary">전체 —개 · 조건에 맞는 룸 —개</p></div>
       <div class="filters">
+        <div><label for="game-id">게임 ID</label><input id="game-id" type="text" maxlength="64" autocomplete="off" aria-describedby="game-help game-error"><span id="game-help" class="secondary">정확히 일치하는 ID · 비우면 전체</span></div>
         <div class="number-filter"><label for="room-number">룸 번호 검색</label><input id="room-number" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{0,6}" autocomplete="off" aria-describedby="number-help number-error"><span id="number-help" class="secondary">앞자리로 검색 · 최대 6자리</span></div>
         <div><label for="phase">상태</label><select id="phase"><option value="all">전체</option><option value="WAITING">대기</option><option value="PLAYING">게임 중</option></select></div>
         <div><label for="visibility">공개 여부</label><select id="visibility"><option value="all">전체</option><option value="public">공개</option><option value="private">비공개</option></select></div>
         <button id="clear-filters" type="button">필터 해제</button>
       </div>
+      <p id="game-error" class="error" role="status"></p>
       <p id="number-error" class="error" role="status"></p>
       <p id="displayed-query" class="secondary"></p>
       <div id="room-scroll" tabindex="0" role="region" aria-label="룸 목록 표, 좌우로 이동 가능" aria-describedby="scroll-help">
-        <table><caption>현재 룸 운영 요약 · 룸 번호 오름차순</caption><colgroup><col class="number-col"><col class="visibility-col"><col class="phase-col"><col class="occupancy-col"><col class="id-col"><col class="id-col"><col class="id-col"><col class="time-col"></colgroup>
-          <thead><tr><th scope="col">룸 번호</th><th scope="col">공개 여부</th><th scope="col">상태</th><th scope="col" class="numeric">인원/정원</th><th scope="col">host</th><th scope="col">룸 ID</th><th scope="col">match ID</th><th scope="col">갱신 시각</th></tr></thead>
+        <table><caption>현재 룸 운영 요약 · 게임 ID, 룸 번호, 룸 ID 오름차순</caption><colgroup><col class="id-col"><col class="number-col"><col class="visibility-col"><col class="phase-col"><col class="occupancy-col"><col class="id-col"><col class="id-col"><col class="id-col"><col class="time-col"></colgroup>
+          <thead><tr><th scope="col">게임 ID</th><th scope="col">룸 번호</th><th scope="col">공개 여부</th><th scope="col">상태</th><th scope="col" class="numeric">인원/정원</th><th scope="col">host</th><th scope="col">룸 ID</th><th scope="col">match ID</th><th scope="col">갱신 시각</th></tr></thead>
           <tbody id="room-rows"></tbody>
         </table>
       </div>
