@@ -1,10 +1,10 @@
 # Docker로 실행하기
 
-Docker Compose로 CoopDock 서버를 빌드하고 실행합니다. 호스트에 Go를 설치할 필요는 없습니다. Godot 예제는 호스트에서 별도로 실행합니다.
+Docker Compose로 [공개 GHCR 이미지](https://github.com/sangjinsu/coopdock/pkgs/container/coopdock)를 내려받아 CoopDock 서버를 실행합니다. 호스트에 Go를 설치하거나 이미지를 직접 빌드할 필요는 없습니다. Godot 예제는 호스트에서 별도로 실행합니다.
 
 ## 준비
 
-Docker Engine과 **Docker Compose 2.24.0 이상**이 필요합니다. Docker daemon이 실행 중인지 확인하세요. Compose 최소 버전은 `.env` 파일을 선택적으로 읽는 설정에 필요합니다.
+Docker Engine과 **Docker Compose 2.24.0 이상**, GHCR에서 이미지를 내려받을 네트워크 연결이 필요합니다. Docker daemon이 실행 중인지 확인하세요. Compose 최소 버전은 `.env` 파일을 선택적으로 읽는 설정에 필요합니다.
 
 ```bash
 docker version
@@ -23,19 +23,19 @@ cd coopdock
 저장소 루트에서 실행하세요. 기본 실행에는 `.env` 파일을 만들 필요가 없습니다.
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 docker compose ps
 curl -f http://127.0.0.1:8080/readyz
 ```
 
-`coopdock` 서비스가 로컬 이미지 `coopdock:local`을 빌드합니다. 기본 접속 주소는 `127.0.0.1:8080`, 게임 ID는 `default`입니다. 운영 대시보드는 기본으로 꺼져 있습니다.
+`coopdock` 서비스가 `ghcr.io/sangjinsu/coopdock:latest`를 내려받아 실행합니다. 기본 접속 주소는 `127.0.0.1:8080`, 게임 ID는 `default`입니다. 운영 대시보드는 기본으로 꺼져 있습니다.
 
-처음 빌드할 때는 base image와 Go 의존성을 내려받습니다. 컨테이너가 시작된 직후 health 상태는 `starting`일 수 있습니다. `/readyz`가 HTTP 200을 반환하고 `docker compose ps`에 `healthy`가 표시되는지 확인하세요. `/readyz`의 정상 응답 본문은 비어 있으므로 `curl -f`에 출력이 없는 것이 정상입니다. 연결 오류가 나면 잠시 뒤 다시 확인합니다.
+Compose는 시작할 때 registry에서 이미지를 확인합니다(`pull_policy: always`). 컨테이너가 시작된 직후 health 상태는 `starting`일 수 있습니다. `/readyz`가 HTTP 200을 반환하고 `docker compose ps`에 `healthy`가 표시되는지 확인하세요. `/readyz`의 정상 응답 본문은 비어 있으므로 `curl -f`에 출력이 없는 것이 정상입니다. 연결 오류가 나면 잠시 뒤 다시 확인합니다.
 
 시작 명령에서 health 확인까지 기다리려면 다음을 사용할 수 있습니다.
 
 ```bash
-docker compose up --build --wait --wait-timeout 120
+docker compose up --wait --wait-timeout 120
 ```
 
 `--wait`는 백그라운드 실행을 포함합니다. `/healthz`도 HTTP 200과 빈 본문을 반환하며, 신규 연결 수용 여부는 `/readyz`로 확인합니다. health 성공은 게임 부하나 Godot 화면 동기화 검증을 뜻하지 않습니다.
@@ -65,6 +65,24 @@ cp .env.example .env
 docker compose up -d
 docker compose ps
 ```
+
+### 실행할 이미지 고르기
+
+기본값은 `main`의 CI 검사를 통과한 소스를 게시하는 `latest`입니다. 특정 이미지를 선택하려면 `.env`에 전체 image 주소를 지정합니다.
+
+```dotenv
+COOPDOCK_IMAGE=ghcr.io/sangjinsu/coopdock:latest
+```
+
+[패키지 페이지](https://github.com/sangjinsu/coopdock/pkgs/container/coopdock)에서 실제 게시된 태그와 digest를 확인하세요.
+
+| image 주소 형식 | 용도 |
+|---|---|
+| `ghcr.io/sangjinsu/coopdock:latest` | `main`에서 마지막으로 게시된 이미지 사용 |
+| `ghcr.io/sangjinsu/coopdock:sha-<40자리-commit-SHA>` | 빌드한 소스 commit 추적 |
+| `ghcr.io/sangjinsu/coopdock@sha256:<digest>` | 정확한 이미지 내용 고정 |
+
+`<40자리-commit-SHA>`와 `<digest>`는 그대로 사용할 수 없는 자리표시자입니다. 실제 게시된 값으로 바꾸세요. SHA 태그도 registry 태그이므로 정확한 내용 고정이 필요하면 digest를 사용합니다. 기존 `v0.1.0` Go 릴리스에 해당하는 이미지 태그는 제공하지 않습니다.
 
 ### 호스트 포트 바꾸기
 
@@ -104,7 +122,21 @@ COOPDOCK_BIND_IP=0.0.0.0
 
 나머지 서버 환경변수는 [설정 표](server-guide.md#설정)를 참고해 `.env`에 추가할 수 있습니다. Compose는 컨테이너의 `HTTP_ADDR=0.0.0.0:8080`을 고정합니다. `WS_ORIGINS`는 기본으로 설정하지 않으며, native Godot 연결은 이 상태로 사용할 수 있습니다. 브라우저의 추가 Origin을 허용할 때만 예제 파일의 주석을 풀고 유효한 host 또는 host:port를 지정하세요. **`WS_ORIGINS=`처럼 빈 값으로 명시하면 서버가 시작을 거절합니다.** 인증 및 Origin 정책은 [서버 가이드](server-guide.md#설정)를 따릅니다.
 
-## 로그, 종료와 다시 빌드하기
+## 이미지 업데이트와 이전 이미지로 복원하기
+
+이미지를 내려받은 뒤 컨테이너에 반영합니다. `latest`를 사용하면 새로 게시된 이미지를 받습니다.
+
+```bash
+docker compose pull
+docker compose up -d --wait --wait-timeout 120
+docker compose ps
+```
+
+`pull`만으로 실행 중인 컨테이너가 바뀌지는 않습니다. `up`이 새 이미지로 컨테이너를 재생성할 때 진행 중인 연결과 메모리의 룸 상태가 사라집니다.
+
+이전 이미지로 돌아가려면 `.env`의 `COOPDOCK_IMAGE`를 **이전에 실제 게시된 SHA 태그 또는 digest**로 바꾼 뒤 같은 명령을 실행합니다. 이미지 복원으로 과거의 룸이나 게임 상태가 복구되지는 않습니다.
+
+## 로그와 종료
 
 로그를 계속 확인합니다. 여기서 `Ctrl+C`는 로그 보기만 끝내며 서버는 계속 실행됩니다.
 
@@ -123,21 +155,33 @@ docker compose down
 
 Compose의 `restart: unless-stopped` 정책은 예기치 않은 종료 뒤 서버를 다시 시작합니다. 직접 중지한 서비스는 `docker compose up -d`로 다시 실행합니다.
 
-소스를 업데이트한 뒤에는 다시 빌드합니다.
-
-```bash
-docker compose up -d --build
-```
-
 룸·비밀번호 자료·membership·게임 상태는 메모리에만 있습니다. 컨테이너를 중지하거나 재시작하면 사라지며 이 구성에는 영속 volume이 없습니다.
 
 ## Compose 없이 실행하기
 
-Dockerfile만으로도 기본 서버를 실행할 수 있습니다. Compose 서버가 같은 포트를 사용 중이면 먼저 `docker compose down`으로 종료하세요.
+공개 이미지를 직접 실행할 수도 있습니다. Compose 서버가 같은 포트를 사용 중이면 먼저 `docker compose down`으로 종료하세요.
 
 ```bash
-docker build -t coopdock:local .
-docker run --rm -p 127.0.0.1:8080:8080 coopdock:local
+docker run --rm --pull always -p 127.0.0.1:8080:8080 ghcr.io/sangjinsu/coopdock:latest
 ```
 
 서버는 터미널에서 실행되며 `Ctrl+C`로 종료합니다. 다른 터미널에서 `/readyz`를 확인하거나 Godot으로 연결할 수 있습니다. 이 명령은 Compose의 `.env`를 자동으로 읽지 않습니다.
+
+## 선택: 소스로 로컬 이미지 빌드하기
+
+소스 변경을 시험하려면 저장소 루트에서 직접 빌드할 수 있습니다. Docker가 build stage의 Go toolchain과 의존성을 내려받으므로 이 경우에도 호스트 Go 설치는 필요하지 않습니다.
+
+```bash
+docker build -t coopdock:local .
+COOPDOCK_IMAGE=coopdock:local docker compose up -d --pull never
+```
+
+`--pull never`는 Compose의 `pull_policy: always`를 덮어 로컬 이미지를 사용합니다. 후속 Compose 명령에도 같은 `COOPDOCK_IMAGE` 값을 지정하거나 `.env`에 저장하세요. GHCR 이미지를 다시 사용하려면 이 값을 게시된 image 주소로 바꿉니다.
+
+## 유지관리자: 이미지 게시
+
+[CI workflow](../.github/workflows/ci.yml)는 Go 1.26.x와 stable의 test·race test·vet·build가 모두 통과한 뒤 이미지를 게시합니다. `main` push 또는 `main`에서의 수동 실행에만 `latest`와 `sha-<40자리-commit-SHA>` 태그를 게시합니다. PR과 다른 branch의 수동 실행에서는 게시하지 않으며, Git release나 버전 태그로 이미지를 자동 발행하지 않습니다. 게시 빌드 대상은 `linux/amd64`, `linux/arm64`입니다.
+
+workflow는 내장 `GITHUB_TOKEN`으로 GHCR에 게시합니다. 최초 생성된 package는 기본으로 private이므로, package admin이 GitHub의 **프로필 → Packages → coopdock → Package settings → Danger Zone → Change visibility → Public**에서 공개 설정을 해야 합니다. repository가 공개여도 package visibility가 자동으로 공개되지는 않습니다. 공개 전환은 private로 되돌릴 수 없습니다. [GitHub의 package 공개 설정 안내](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)를 참고하세요.
+
+공개 package는 다운로드에 `docker login`이나 PAT가 필요하지 않습니다. 게시 결과의 digest와 `org.opencontainers.image.revision` label로 이미지와 source commit을 대조할 수 있습니다.

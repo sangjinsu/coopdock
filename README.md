@@ -1,6 +1,6 @@
 # CoopDock · 코옵독
 
-[![CoopDock v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/sangjinsu/coopdock/releases/tag/v0.1.0) [![Go CI](https://github.com/sangjinsu/coopdock/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sangjinsu/coopdock/actions/workflows/ci.yml)
+[![CoopDock v0.1.0](https://img.shields.io/badge/version-v0.1.0-blue)](https://github.com/sangjinsu/coopdock/releases/tag/v0.1.0) [![CI](https://github.com/sangjinsu/coopdock/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sangjinsu/coopdock/actions/workflows/ci.yml)
 
 **방을 만들고, 친구를 초대하고, 함께 움직이세요.**
 
@@ -38,6 +38,12 @@ go run ./cmd/server
 ```
 
 서버가 `127.0.0.1:8080`에서 시작됩니다.
+Go 설치 없이 공개 GHCR 이미지를 실행하려면 저장소 루트에서 다음 명령을 사용하세요. 준비와 설정은 [Docker 실행 가이드](docs/docker.md)를 참고하세요.
+
+```bash
+docker compose up -d
+```
+
 [Godot 예제](examples/godot/README.md)를 두 창으로 열어 같은 게임 ID와 룸에 접속하고, 방장이 게임을 시작하면 함께 움직일 수 있습니다.
 서버만 먼저 확인하려면 [빠른 시작의 6개 WebSocket 연결 검사](docs/getting-started.md#4-여섯-연결로-검사하기)를 실행하세요.
 
@@ -78,7 +84,7 @@ host가 listener를 열고, 종료 시 `service.Shutdown(ctx)`와 `host.Shutdown
 | 문서 | 찾을 수 있는 내용 |
 |---|---|
 | [빠른 시작](docs/getting-started.md) | 준비부터 로컬 실행과 연결 검사까지 |
-| [Docker로 실행](docs/docker.md) | Compose 실행, 포트·게임 ID 설정, 로그와 종료 |
+| [Docker로 실행](docs/docker.md) | 공개 GHCR 이미지, Compose 실행, 설정과 이미지 업데이트 |
 | [Godot 3D/2D 예제](examples/godot/README.md) | 두 창 실행, 룸 입장, 이동 조작과 표시 |
 | [서버 사용·운영 가이드](docs/server-guide.md) | 현재 동작, 메시지 예제, 설정과 검증 |
 | [대시보드 켜기](docs/server-guide.md#운영-대시보드-켜기) | 운영 인증 설정과 조회 화면 |

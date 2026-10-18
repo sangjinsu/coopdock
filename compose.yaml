@@ -1,8 +1,7 @@
 services:
   coopdock:
-    build:
-      context: .
-    image: coopdock:local
+    image: "${COOPDOCK_IMAGE:-ghcr.io/sangjinsu/coopdock:latest}"
+    pull_policy: always
     ports:
       - "${COOPDOCK_BIND_IP:-127.0.0.1}:${COOPDOCK_PORT:-8080}:8080"
     env_file:

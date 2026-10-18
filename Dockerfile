@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.27.2-alpine3.24 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine3.24 AS build
+
+ARG TARGETOS
+ARG TARGETARCH
 
 ENV CGO_ENABLED=0 \
     GOTOOLCHAIN=local
@@ -13,7 +16,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags="-s -w" -o /out/coopdock ./cmd/server
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/coopdock ./cmd/server
 
 FROM alpine:3.24.2
 
