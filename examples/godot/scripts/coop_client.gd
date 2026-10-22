@@ -20,6 +20,11 @@ var _pending: Dictionary = {}
 var _request_counter: int = 0
 var _last_heartbeat_ms: int = 0
 var _connecting_since_ms: int = 0
+var _sync_scope: Dictionary = {}
+var _input_ack_rtt_ms: Variant = null
+var _snapshot_received_ms: Variant = null
+var _snapshot_tick: Variant = null
+var _snapshot_seq: Variant = null
 
 func _set_status(value: String) -> void:
 	if status != value:
@@ -61,6 +66,7 @@ func disconnect_guest() -> void:
 		_peer.close(1000, "Client disconnect")
 	_pending.clear()
 	state.new_connection(state.connection_generation + 1)
+	_refresh_sync_scope()
 	next_input_seq = 1
 	_request_counter = 0
 	_last_heartbeat_ms = _now_msec()
@@ -137,8 +143,11 @@ func _request(op: String, payload: Dictionary) -> String:
 	_request_counter += 1
 	var id: String = "c%d-r%d" % [state.connection_generation, _request_counter]
 	# Never retain request payloads or passwords in correlation records.
+	var sent_ms: int = _now_msec()
 	_pending[id] = {"op": op, "epoch": state.operation_epoch,
-		"generation": state.connection_generation, "deadline": _now_msec() + request_timeout_ms}
+		"generation": state.connection_generation, "deadline": sent_ms + request_timeout_ms}
+	if op == "game.action":
+		_pending[id].merge({"sent_ms": sent_ms, "match_id": payload.match_id, "input_seq": payload.input_seq})
 	var result: Error = _send_text(WireCodec.encode_request(op, id, payload))
 	if result != OK:
 		_pending.erase(id)
@@ -155,7 +164,33 @@ func _send_text(text: String) -> Error:
 func _now_msec() -> int:
 	return Time.get_ticks_msec()
 
+func _refresh_sync_scope() -> void:
+	var scope: Dictionary = {"generation": state.connection_generation, "epoch": state.operation_epoch,
+		"room_id": state.current_snapshot.get("room_id"), "match_id": state.current_snapshot.get("match_id")}
+	if scope == _sync_scope:
+		return
+	_sync_scope = scope
+	_input_ack_rtt_ms = null
+	_snapshot_received_ms = null
+	_snapshot_tick = null
+	_snapshot_seq = null
+
+func get_sync_status() -> Dictionary:
+	_refresh_sync_scope()
+	return {"input_ack_rtt_ms": _input_ack_rtt_ms,
+		"snapshot_age_ms": null if _snapshot_received_ms == null else maxi(0, _now_msec() - int(_snapshot_received_ms)),
+		"server_tick": _snapshot_tick, "snapshot_seq": _snapshot_seq}
+
+func _record_input_ack(pending: Dictionary, payload: Dictionary, received_ms: int) -> void:
+	_refresh_sync_scope()
+	if pending.generation != state.connection_generation or pending.epoch != state.operation_epoch or state.current_snapshot.get("phase") != "PLAYING":
+		return
+	if pending.match_id != state.current_snapshot.get("match_id") or payload.match_id != pending.match_id or int(payload.input_seq) != int(pending.input_seq) or received_ms < int(pending.sent_ms):
+		return
+	_input_ack_rtt_ms = received_ms - int(pending.sent_ms)
+
 func _emit_snapshot() -> void:
+	_refresh_sync_scope()
 	var phase: String = state.current_snapshot.get("phase", "")
 	_set_status("playing" if phase == "PLAYING" else ("waiting" if phase == "WAITING" else "guest"))
 	snapshot_changed.emit(state.current_snapshot.duplicate(true))
@@ -183,7 +218,13 @@ func _accept_text(text: String, generation: int, received_ms: int) -> void:
 			state.accept_guest(message.payload.session_id, message.payload.game_id)
 			_last_heartbeat_ms = received_ms
 			_set_status("guest")
+			list_rooms()
 		elif state.apply_event(op, message.payload):
+			_refresh_sync_scope()
+			if op == "game.snapshot" and state.current_snapshot.get("phase") == "PLAYING":
+				_snapshot_received_ms = received_ms
+				_snapshot_tick = int(state.current_snapshot.server_tick)
+				_snapshot_seq = int(state.current_snapshot.snapshot_seq)
 			_emit_snapshot()
 		return
 	var id: String = message.request_id
@@ -211,6 +252,7 @@ func _accept_text(text: String, generation: int, received_ms: int) -> void:
 			"room.list":
 				rooms_received.emit(payload.rooms.duplicate(true))
 			"game.action":
+				_record_input_ack(pending, payload, received_ms)
 				if payload.match_id == state.current_snapshot.get("match_id"):
 					input_acknowledged.emit(payload.duplicate(true))
 	request_completed.emit(op, id, payload, error)
@@ -263,7 +305,10 @@ func _process(_delta: float) -> void:
 				if generation != state.connection_generation:
 					break
 		elif ready_state == WebSocketPeer.STATE_CLOSED and status != "disconnected":
+			var close_code: int = _peer.get_close_code()
+			var close_reason: String = _peer.get_close_reason()
 			disconnect_guest()
+			request_failed.emit("session.guest", "CLIENT_DISCONNECTED", "WebSocket closed (%d): %s" % [close_code, close_reason])
 		if status == "connecting" and now_ms - _connecting_since_ms >= request_timeout_ms:
 			request_failed.emit("session.guest", "CLIENT_TIMEOUT", "Guest connection deadline exceeded.")
 			disconnect_guest()

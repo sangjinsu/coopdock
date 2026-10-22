@@ -249,6 +249,7 @@ func _connect_clicked() -> void:
 func _disconnect_clicked() -> void:
 	if _client != null:
 		_client.disconnect_guest()
+		status_label.text = "연결을 종료했습니다. 다시 연결하면 새 guest 세션으로 시작합니다."
 
 func _join_clicked() -> void:
 	if _client == null or join_button.disabled:
@@ -366,7 +367,7 @@ func _handle_rooms(rooms: Array) -> void:
 func _handle_failure(op: String, code: String, message: String) -> void:
 	if not is_node_ready():
 		return
-	var guidance: Dictionary = {"PASSWORD_REQUIRED": "비공개 방입니다. 비밀번호를 입력하세요.", "PASSWORD_INVALID": "비밀번호를 확인하고 다시 입장하세요.", "ROOM_NOT_FOUND": "룸 번호를 확인하세요.", "ROOM_FULL": "방이 가득 찼습니다. 다른 방을 선택하세요.", "NOT_HOST": "방장만 게임을 시작할 수 있습니다.", "INVALID_PHASE": "현재 방 상태에서는 이 작업을 할 수 없습니다.", "CLIENT_TIMEOUT": "서버 응답 시간이 초과되었습니다. 연결 상태를 확인하세요.", "CLIENT_BUSY": "요청이 많습니다. 잠시 뒤 다시 시도하세요.", "CLIENT_SEND_FAILED": "요청을 보내지 못했습니다. 연결을 확인하세요.", "CLIENT_CONNECT_FAILED": "서버 주소와 등록된 게임 ID를 확인하세요.", "CLIENT_PROTOCOL": "서버의 게임 연결 정보가 올바르지 않습니다. 서버 설정을 확인하세요."}
+	var guidance: Dictionary = {"PASSWORD_REQUIRED": "비공개 방입니다. 비밀번호를 입력하세요.", "PASSWORD_INVALID": "비밀번호를 확인하고 다시 입장하세요.", "ROOM_NOT_FOUND": "룸 번호를 확인하세요.", "ROOM_FULL": "방이 가득 찼습니다. 다른 방을 선택하세요.", "NOT_HOST": "방장만 게임을 시작할 수 있습니다.", "INVALID_PHASE": "현재 방 상태에서는 이 작업을 할 수 없습니다.", "CLIENT_TIMEOUT": "서버 응답 시간이 초과되었습니다. 연결 상태를 확인하세요.", "CLIENT_BUSY": "요청이 많습니다. 잠시 뒤 다시 시도하세요.", "CLIENT_SEND_FAILED": "요청을 보내지 못했습니다. 연결을 확인하세요.", "CLIENT_CONNECT_FAILED": "서버 주소와 등록된 게임 ID를 확인하세요.", "CLIENT_PROTOCOL": "서버의 게임 연결 정보가 올바르지 않습니다. 서버 설정을 확인하세요.", "CLIENT_DISCONNECTED": "연결이 끊겼습니다. 서버 상태를 확인한 뒤 연결 버튼으로 새 guest 세션을 시작하세요. 이전 방에는 다시 입장해야 합니다."}
 	status_label.text = "%s\n[%s] %s" % [guidance.get(code, "요청을 처리하지 못했습니다. 상태를 확인하고 다시 시도하세요."), code, message]
 	if op == "room.join" and code in ["PASSWORD_REQUIRED", "PASSWORD_INVALID"]:
 		join_password_edit.show()

@@ -54,39 +54,75 @@ func processed(seq: int) -> Dictionary:
 		return s.get("phase") == "PLAYING" and s.last_processed_input_seq.get(id, 0) >= seq)
 
 func self_player(snapshot: Dictionary) -> Dictionary:
-	for player: Dictionary in snapshot.game_state.players:
+	var game_state: Variant = snapshot.get("game_state")
+	if not game_state is Dictionary:
+		return {}
+	for player: Dictionary in game_state.get("players", []):
 		if player.session_id == main.client.state.session_id:
 			return player
 	return {}
 
-func movement_and_gates() -> void:
+func await_stop_barrier(timeout_ms: int = 10000) -> bool:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while main.controller._pending_stop and Time.get_ticks_msec() < deadline:
+		await process_frame
+	if main.controller._pending_stop:
+		check(false, "controller stop confirmation deadline")
+		return false
+	return true
+
+func submit_physical_input(movement: MovementInput) -> int:
+	# Main/controller auto-processing is disabled by this harness. Re-sample only
+	# after its previous stop is confirmed; an ACK never replays a discarded key.
+	if not await await_stop_barrier():
+		return 0
+	var sequence := main.client.next_input_seq
+	main.controller.submit_direction(movement.sample(true, false, main.controller.view_mode == "3d"))
+	if main.client.next_input_seq != sequence + 1:
+		check(false, "fresh physical sample produces an actual input request")
+		return 0
+	return sequence
+
+func movement_and_gates() -> bool:
 	var movement := MovementInput.new()
 	main.controller.set_input_gate(true, false)
 	key(true)
 	await process_frame
 	check(movement.sample(true, false) == Vector3.RIGHT, "physical Input.parse_input_event D")
-	var move_seq := main.client.next_input_seq
-	main.controller.submit_direction(movement.sample(true, false))
+	var move_seq := await submit_physical_input(movement)
+	if move_seq == 0:
+		return false
 	var moving := await processed(move_seq)
+	if moving.is_empty():
+		return false
 	check(self_player(moving).velocity.x == 5, "physical event direction receives server movement")
 	key(false)
 	await process_frame
-	var stop_seq := main.client.next_input_seq
-	main.controller.submit_direction(movement.sample(true, false))
+	var stop_seq := await submit_physical_input(movement)
+	if stop_seq == 0:
+		return false
 	var stopped := await processed(stop_seq)
+	if stopped.is_empty():
+		return false
 	check(self_player(stopped).velocity.x == 0, "physical release receives server zero")
 	proof["move_snapshot"] = moving
 	proof["stop_snapshot"] = stopped
 	key(true)
 	await process_frame
-	main.controller.submit_direction(movement.sample(true, false))
-	await processed(main.client.next_input_seq - 1)
+	move_seq = await submit_physical_input(movement)
+	if move_seq == 0 or (await processed(move_seq)).is_empty():
+		return false
 	main.lobby.room_number_edit.grab_focus()
 	await process_frame
 	check(main._text_focused(), "root Window gui focus detects LineEdit")
 	var text_stop := main.client.next_input_seq
 	main.controller.set_input_gate(true, main._text_focused())
+	if main.client.next_input_seq != text_stop + 1:
+		check(false, "text focus transmits its stop before waiting")
+		return false
 	var text_snapshot := await processed(text_stop)
+	if text_snapshot.is_empty():
+		return false
 	check(self_player(text_snapshot).velocity.x == 0, "LineEdit focus sends zero")
 	main.lobby.room_number_edit.release_focus()
 	main.controller.set_input_gate(true, false)
@@ -95,11 +131,17 @@ func movement_and_gates() -> void:
 	await process_frame
 	key(true)
 	await process_frame
-	main.controller.submit_direction(movement.sample(true, false))
-	await processed(main.client.next_input_seq - 1)
+	move_seq = await submit_physical_input(movement)
+	if move_seq == 0 or (await processed(move_seq)).is_empty():
+		return false
 	var window_stop := main.client.next_input_seq
 	root.focus_exited.emit()
+	if main.client.next_input_seq != window_stop + 1:
+		check(false, "window focus transmits its stop before waiting")
+		return false
 	var window_snapshot := await processed(window_stop)
+	if window_snapshot.is_empty():
+		return false
 	check(self_player(window_snapshot).velocity.x == 0, "Window focus_exited signal invokes stop gate")
 	root.focus_entered.emit()
 	check(movement.sample(true, false) == Vector3.ZERO, "Window focus recovery requires fresh key")
@@ -112,6 +154,7 @@ func movement_and_gates() -> void:
 	check(main.controller._focused == root.has_focus(), "Main polls actual root Window has_focus")
 	check(main.controller._text_focused == main._text_focused(), "Main polls actual root Window text focus owner")
 	proof["root_window_polling_verified"] = true
+	return true
 
 func save_png(path: String) -> void:
 	await process_frame
@@ -155,12 +198,16 @@ func _run() -> void:
 	focus_edit.size = Vector2(190, 36)
 	focus_edit.placeholder_text = "입력 focus QA"
 	if role == "host":
-		await movement_and_gates()
+		if not await movement_and_gates():
+			quit(1)
+			return
 		write_json(room_file + ".host-input", {"done": true})
 		await wait_file(room_file + ".peer-input")
 	else:
 		await wait_file(room_file + ".host-input")
-		await movement_and_gates()
+		if not await movement_and_gates():
+			quit(1)
+			return
 		write_json(room_file + ".peer-input", {"done": true})
 	await process_frame
 	check(main.world.avatars.size() == 2, "two independent native avatar views")
@@ -194,50 +241,65 @@ func _run() -> void:
 	print("native ", role, " checks=", checks, " failures=", failures)
 	quit(0 if failures == 0 else 1)
 
-func axis_move(direction: Vector3, seconds: float) -> void:
+func axis_move(direction: Vector3, seconds: float) -> bool:
 	var seq := main.client.next_input_seq
 	check(not main.client.send_direction(direction).is_empty(), "normal move command for display seeding")
-	await processed(seq)
+	if (await processed(seq)).is_empty():
+		return false
 	await create_timer(maxf(seconds, 0.01)).timeout
 	seq = main.client.next_input_seq
 	check(not main.client.send_direction(Vector3.ZERO).is_empty(), "normal zero command after display seeding")
-	await processed(seq)
+	return not (await processed(seq)).is_empty()
 
-func mixed_keys() -> void:
-	await movement_and_gates()
+func mixed_keys() -> bool:
+	if not await movement_and_gates():
+		return false
 	main.controller.set_input_gate(true, false)
+	var movement := MovementInput.new()
 	var allow_y := main.controller.view_mode == "3d"
 	key(true, KEY_W)
 	await process_frame
-	var before := main.client.next_input_seq
-	main.controller._process(0.0)
+	var before := await submit_physical_input(movement)
+	if before == 0:
+		return false
 	var moved := await processed(before)
+	if moved.is_empty():
+		return false
 	check(self_player(moved).velocity.z == -5, "physical W reaches server negative Z")
 	main.controller._process(0.0)
 	check(main.client.next_input_seq == before + 1, "single controller no duplicate held direction")
 	key(false, KEY_W)
 	await process_frame
-	before = main.client.next_input_seq
-	main.controller._process(0.0)
+	before = await submit_physical_input(movement)
+	if before == 0:
+		return false
 	var stopped := await processed(before)
+	if stopped.is_empty():
+		return false
 	check(self_player(stopped).velocity.z == 0, "physical W release zero acknowledged")
 	var y_before: float = self_player(stopped).position.y
 	for code: int in [KEY_Q, KEY_E]:
 		key(true, code)
 		await process_frame
-		before = main.client.next_input_seq
-		main.controller._process(0.0)
 		if allow_y:
-			await processed(before)
+			before = await submit_physical_input(movement)
+			if before == 0 or (await processed(before)).is_empty():
+				return false
 			await create_timer(0.15).timeout
 			key(false, code)
 			await process_frame
-			main.controller._process(0.0)
-			var vertical_stop := await processed(main.client.next_input_seq - 1)
+			before = await submit_physical_input(movement)
+			if before == 0:
+				return false
+			var vertical_stop := await processed(before)
+			if vertical_stop.is_empty():
+				return false
 			var y_after: float = self_player(vertical_stop).position.y
 			check(y_after < y_before if code == KEY_Q else y_after > y_before, "3D physical Q/E changes authoritative Y")
 			y_before = y_after
 		else:
+			before = main.client.next_input_seq
+			main.controller._process(0.0)
 			check(main.client.next_input_seq == before, "2D physical Q/E sends no vertical command")
 			key(false, code)
 			await process_frame
@@ -247,15 +309,23 @@ func mixed_keys() -> void:
 		for mode: String in ["3d", "2d"]:
 			key(true)
 			await process_frame
-			main.controller._process(0.0)
-			await processed(main.client.next_input_seq - 1)
+			before = await submit_physical_input(movement)
+			if before == 0 or (await processed(before)).is_empty():
+				return false
 			before = main.client.next_input_seq
 			main._set_view_mode(mode)
+			if main.client.next_input_seq != before + 1:
+				check(false, "mode switch transmits its stop before waiting")
+				return false
 			check(main.world.buffer._latest_received_ms == main.world_2d.buffer._latest_received_ms, "both mode timelines receive same reset clock")
 			var ack := await driver.await_reply("c%d-r%d" % [main.client.state.connection_generation, main.client._request_counter])
 			check(ack.error.is_empty() and ack.payload.input_seq == before, "mode zero receives exact input ACK")
+			if not ack.error.is_empty():
+				return false
 			seqs.append(before)
 			var reset := await processed(before)
+			if reset.is_empty():
+				return false
 			check(self_player(reset).velocity == {"x": 0.0, "y": 0.0, "z": 0.0}, "mode zero authoritative velocity")
 			check(main.client.state.session_id == original.members.filter(func(m: Dictionary): return m.session_id == main.client.state.session_id)[0].session_id and main.client.state.game_id == original.game_id and reset.room_id == original.room_id and reset.match_id == original.match_id, "mode preserves namespace room match session")
 			check(MovementInput.new().sample(true, false, mode == "3d") == Vector3.ZERO, "mode switch releases held physical action")
@@ -267,6 +337,7 @@ func mixed_keys() -> void:
 		check(seqs[1] > seqs[0], "mode switches preserve increasing input lifetime")
 		proof["mode_zero_sequences"] = seqs
 		check(self_player(main.client.state.current_snapshot).position.y == y_before, "2D movement and mode switches preserve server Y")
+	return true
 
 func run_mixed() -> void:
 	role = arg("--mode", "host")
@@ -304,9 +375,13 @@ func run_mixed() -> void:
 		if role == "peer":
 			await wait_file(room_file + ".host-keys")
 			main._set_view_mode("3d")
-			await axis_move(Vector3.UP, 0.25)
+			if not await await_stop_barrier() or not await axis_move(Vector3.UP, 0.25):
+				quit(1)
+				return
 			main._set_view_mode("2d")
-		await mixed_keys()
+		if not await mixed_keys():
+			quit(1)
+			return
 		if role == "host":
 			write_json(room_file + ".host-keys", {"done": true})
 	# Use only the public move action to spread six authoritative positions.
@@ -319,11 +394,15 @@ func run_mixed() -> void:
 	var player := self_player(main.client.state.current_snapshot)
 	var x_delta: float = target.x - float(player.position.x)
 	if absf(x_delta) > 0.05:
-		await axis_move(Vector3(signf(x_delta), 0, 0), absf(x_delta) / 5.0)
+		if not await axis_move(Vector3(signf(x_delta), 0, 0), absf(x_delta) / 5.0):
+			quit(1)
+			return
 	player = self_player(main.client.state.current_snapshot)
 	var z_delta: float = target.y - float(player.position.z)
 	if absf(z_delta) > 0.05:
-		await axis_move(Vector3(0, 0, signf(z_delta)), absf(z_delta) / 5.0)
+		if not await axis_move(Vector3(0, 0, signf(z_delta)), absf(z_delta) / 5.0):
+			quit(1)
+			return
 	write_json(room_file + "." + role + "-ready", {"done": true})
 	for other: String in ["host", "peer", "seed0", "seed1", "seed2", "seed3"]:
 		await wait_file(room_file + "." + other + "-ready")

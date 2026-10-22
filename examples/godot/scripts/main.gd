@@ -9,6 +9,7 @@ var view_select: OptionButton
 var _hint: Label
 var controller: InputController
 var _summary: Label
+var _sync_status_label: Label
 var _lobby_toggle: Button
 var _playing: bool = false
 var _expanded: bool = false
@@ -67,7 +68,14 @@ func _ready() -> void:
 		controller.submit_direction(Vector3.ZERO)
 		client.leave_room())
 	bar.add_child(leave)
+	_sync_status_label = Label.new()
+	_sync_status_label.add_theme_font_size_override("font_size", 14)
+	_sync_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_sync_status_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	_sync_status_label.tooltip_text = "입력 ACK RTT: 현재 game.action 전송부터 적용 성공 ACK까지의 왕복 시간입니다. 편도 지연이나 화면 표시 지연이 아닙니다.\nSnapshot 경과: 마지막으로 수락한 현재 match의 주기 game.snapshot 이후 local monotonic 경과입니다. Tick / seq도 같은 capture의 값이며, —는 미측정입니다."
+	page.add_child(_sync_status_label)
 	_hint = Label.new()
+	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hint.text = "WASD / 방향키 이동 · Q/E 높이 · 청록색: 나 · 주황색: 참가자 · 서버 snapshot 위치"
 	page.add_child(_hint)
 	lobby = LobbyPanel.new()
@@ -87,11 +95,21 @@ func _text_focused() -> bool:
 
 func _process(_delta: float) -> void:
 	controller.set_input_gate(get_window().has_focus(), _text_focused())
+	_update_sync_status()
+
+func _update_sync_status() -> void:
+	var value := client.get_sync_status()
+	_sync_status_label.text = "입력 ACK RTT: %s · Snapshot 경과: %s · Tick: %s / seq: %s" % [
+		"—" if value.input_ack_rtt_ms == null else "%d ms" % value.input_ack_rtt_ms,
+		"—" if value.snapshot_age_ms == null else "%d ms" % value.snapshot_age_ms,
+		"—" if value.server_tick == null else str(value.server_tick),
+		"—" if value.snapshot_seq == null else str(value.snapshot_seq)]
 
 func _on_snapshot(snapshot: Dictionary) -> void:
 	_playing = snapshot.get("phase") == "PLAYING"
 	_summary.text = "CoopDock · 게임 %s · 방 %s · %s · %d명" % [client.state.game_id, snapshot.get("room_number", "—"), snapshot.get("phase", client.status), snapshot.get("members", []).size()]
 	_summary.tooltip_text = _summary.text
+	_update_sync_status()
 	_update_lobby()
 
 func _update_lobby() -> void:

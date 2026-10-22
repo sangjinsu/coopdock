@@ -36,14 +36,14 @@ def run(cmd, name, timeout=60):
     print(name, 'exit', code, text[-1200:], flush=True)
     if code or 'SCRIPT ERROR:' in text or '\nERROR:' in text:
         raise RuntimeError(name+' failed')
-def server(name, read_timeout=None):
+def server(name, read_timeout=None, game_ids='default'):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
-    server_env=env.copy(); server_env['HTTP_ADDR']='127.0.0.1:'+str(port)
+    server_env=env.copy(); server_env.update(HTTP_ADDR='127.0.0.1:'+str(port), GAME_IDS=game_ids)
     if read_timeout: server_env['WS_READ_TIMEOUT']=read_timeout
     stream=(out/(name+'-server.log')).open('w'); streams.append(stream)
     proc=subprocess.Popen([str(out/'coopdock-server')],env=server_env,stdout=stream,stderr=subprocess.STDOUT)
-    owned.append(proc); metadata['children'].append({'pid':proc.pid,'kind':name+'-server','port':port,'WS_READ_TIMEOUT':read_timeout or 'default'})
+    owned.append(proc); metadata['children'].append({'pid':proc.pid,'kind':name+'-server','port':port,'GAME_IDS':game_ids,'WS_READ_TIMEOUT':read_timeout or 'default'})
     deadline=time.monotonic()+8
     while time.monotonic()<deadline:
         if proc.poll() is not None: raise RuntimeError('owned server exited early')
@@ -66,9 +66,15 @@ try:
             run([godot,'--headless','--path','examples/godot','--import'],'import-final')
             run([godot,'--headless','--path','examples/godot','--script','res://tests/run_unit.gd'],'unit-final')
             run([godot,'--headless','--path','examples/godot','--script','res://tests/run_final_fix.gd'],'input-lifecycle-final')
+            run([godot,'--headless','--path','examples/godot','--script','res://tests/run_render_input.gd'],'render-input')
+            run([godot,'--headless','--path','examples/godot','--script','res://tests/run_sync_status.gd'],'sync-status')
+            run([godot,'--headless','--path','examples/godot','--script','res://tests/run_game_scope_unit.gd'],'game-scope-unit')
         if '--heartbeat-only' not in sys.argv:
             proc,url=server('integration')
             run([godot,'--headless','--path','examples/godot','--script','res://tests/run_integration.gd','--','--url',url],'integration',45)
+            stop(proc)
+            proc,url=server('game-scope',game_ids='game-a,game-b')
+            run([godot,'--headless','--path','examples/godot','--script','res://tests/run_game_scope_integration.gd','--','--url='+url],'game-scope-integration',40)
             stop(proc)
         proc,url=server('heartbeat','3s')
         run([godot,'--headless','--path','examples/godot','--script','res://tests/run_integration.gd','--','--url',url,'--heartbeat-only'],'heartbeat',15)
@@ -90,12 +96,19 @@ try:
             owned.append(child); native.append((role,child,cmd))
             metadata['children'].append({'pid':child.pid,'kind':'native-'+role})
         deadline=time.monotonic()+(90 if mixed else 65)
-        for role,child,cmd in native:
-            code=child.wait(timeout=max(1,deadline-time.monotonic()))
-            metadata['commands'].append({'argv':cmd,'exit':code})
-            text=(out/('native-'+role+'.log')).read_text()
-            print(role,'exit',code,text[-2000:],flush=True)
-            if code or 'SCRIPT ERROR:' in text or '\nERROR:' in text: raise RuntimeError('native '+role+' failed')
+        unfinished={role for role,_,_ in native}
+        while unfinished:
+            if time.monotonic() >= deadline: raise RuntimeError('native child deadline: '+','.join(sorted(unfinished)))
+            for role,child,cmd in native:
+                if role not in unfinished: continue
+                code=child.poll()
+                if code is None: continue
+                unfinished.remove(role)
+                metadata['commands'].append({'argv':cmd,'exit':code})
+                text=(out/('native-'+role+'.log')).read_text()
+                print(role,'exit',code,text[-2000:],flush=True)
+                if code or 'SCRIPT ERROR:' in text or '\nERROR:' in text: raise RuntimeError('native '+role+' failed')
+            if unfinished: time.sleep(.05)
         captures=[json.loads((out/('native-'+role+'-captures.json')).read_text()) for role,_ in roles]
         common=set.intersection(*(set(c) for c in captures))
         assert common, 'native no common capture'
