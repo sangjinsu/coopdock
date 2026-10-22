@@ -86,6 +86,7 @@ host가 listener를 열고, 종료 시 `service.Shutdown(ctx)`와 `host.Shutdown
 | [빠른 시작](docs/getting-started.md) | 준비부터 로컬 실행과 연결 검사까지 |
 | [Docker로 실행](docs/docker.md) | 공개 GHCR 이미지, Compose 실행, 설정과 이미지 업데이트 |
 | [Godot 3D/2D 예제](examples/godot/README.md) | 두 창 실행, 룸 입장, 이동 조작과 표시 |
+| [동기화 부하 테스트](docs/load-testing.md) | 여러 룸 동시 이동 측정과 검증 범위 |
 | [서버 사용·운영 가이드](docs/server-guide.md) | 현재 동작, 메시지 예제, 설정과 검증 |
 | [대시보드 켜기](docs/server-guide.md#운영-대시보드-켜기) | 운영 인증 설정과 조회 화면 |
 | [현재 서버 구조](docs/architecture.md) | 게임 처리와 운영 조회의 내부 경로 |

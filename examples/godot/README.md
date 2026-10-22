@@ -61,6 +61,44 @@ version 1 응답의 guest·full snapshot 및 room list에 추가된 `game_id`를
 
 보간은 local monotonic **수신 시각**과 수신 간격을 쓰며 duration은 16~200ms입니다. 500ms를 넘는 gap에서는 이전 sample을 버리고 즉시 snap합니다. 보간에는 추가 표시 지연이 있습니다. 서버 simulation clock과 각 창의 receive clock은 동기화되지 않으므로 같은 snapshot을 받아도 두 창의 순간 표시 위치·보간 alpha가 같다고 보장하지 않습니다. 설정된 Hz나 tick 개수로 실제 처리율·표시 지연을 추정하지 않습니다.
 
+## 연결과 동기화 상태 확인하기
+
+연결은 WebSocket 요청 접수만으로 완료되지 않고 서버의 올바른 guest 응답까지 받아야 준비 상태가 됩니다.
+guest 연결이 완료되면 public 룸 목록을 한 번 바로 요청합니다. 다른 참가자의 생성·퇴장 뒤 목록을 다시 보려면 새로고침합니다.
+예기치 않게 연결이 닫히면 오류와 재연결 안내를 확인하세요. 재연결하면 새 guest가 되며 이전 룸이나 진행 중인 match를 자동 복원하지 않습니다.
+
+3D·2D는 같은 입력·수신 상태를 사용하며 공통 HUD에서 다음 값을 확인합니다.
+
+| 표시 | 읽는 방법 |
+|---|---|
+| 입력 ACK RTT | 최근 유효한 `game.action` 입력을 보내 서버의 적용 ACK를 받기까지의 왕복 시간 |
+| Snapshot 경과 | 현재 match에서 마지막으로 수락한 주기 snapshot 이후의 local 경과 시간 |
+| Tick / snapshot seq | 같은 수락 snapshot의 서버 계산 번호와 룸 snapshot 번호 |
+
+값이 아직 없을 때는 `—`로 표시하며, 실제 관측한 0ms는 `0 ms`로 표시할 수 있습니다. 이동 입력이 없으면 ACK RTT도 새로 측정되지 않습니다.
+Snapshot 경과가 늘어나는 동안 화면은 마지막 상태를 표시할 수 있습니다. 경과 시간은 서버가 계산한 시간이나 화면의 편도 지연이 아닙니다.
+이전 연결·operation epoch·match의 응답과 stale snapshot은 현재 지표를 되살리지 않으며, 퇴장·새 match·재연결에서는 소속 지표를 초기화합니다.
+mode 전환은 소속을 바꾸지 않으므로 3D·2D 지표의 의미도 같습니다.
+여러 룸을 동시에 측정하려면 [동기화 부하 테스트](../../docs/load-testing.md)를 사용하세요. 20Hz 연속 입력의 부하 조건은 예제의 방향 변경 입력과 구분합니다.
+
+자신의 표시 component에서도 `CoopClient.get_sync_status() -> Dictionary`로 같은 값을 읽을 수 있습니다.
+
+| field | type | 내용 |
+|---|---|---|
+| `input_ack_rtt_ms` | `int` 또는 `null` | 현재 소속의 최근 입력 적용 ACK 왕복 ms |
+| `snapshot_age_ms` | `int` 또는 `null` | 마지막 수락 periodic snapshot 이후 경과 ms |
+| `server_tick` | `int` 또는 `null` | 같은 periodic snapshot의 서버 tick |
+| `snapshot_seq` | `int` 또는 `null` | 같은 periodic snapshot의 룸 snapshot seq |
+
+```gdscript
+var sync: Dictionary = client.get_sync_status()
+if sync.input_ack_rtt_ms != null:
+    print("Input ACK RTT: %d ms" % sync.input_ack_rtt_ms)
+```
+
+입장 응답·`game.started`·`room.state`를 받은 것만으로 주기 snapshot 지표를 채우지 않습니다.
+연결 전·퇴장·새 match·재연결 직후에는 네 field가 모두 `null`이며, 현재 소속의 실제 ACK·periodic snapshot을 받으면 각각 갱신합니다.
+
 ## Timeout과 heartbeat
 
 client request timeout은 기본 **10초**, pending 요청 상한은 **64개**입니다. 기본 **30초마다 `room.list {}`** data request를 보내 서버 read deadline을 유지합니다. 서버 `WS_READ_TIMEOUT` 기본값은 120초입니다. 서버 timeout을 줄일 때는 `CoopClient.heartbeat_interval_ms`도 그보다 짧게 조정하세요. 기본 UI에는 이 값을 바꾸는 설정란이 없습니다. WebSocket ping만으로 data request를 대신하지 않습니다.
@@ -77,19 +115,28 @@ GODOT_CHECKS_OUTPUT_DIR=work/godot-client/local examples/godot/tests/run_checks.
 GODOT_CHECKS_OUTPUT_DIR=work/godot-client/local-mixed examples/godot/tests/run_checks.sh --mixed-native
 ```
 
-기본 runner는 import → unit → 입력/lifecycle 회귀 → 실제 wire → 짧은 timeout heartbeat 순서입니다. 임시 localhost port를 골라 `GAME_IDS=default` 서버를 build/start하고, 상속받은 `ROOM_*`·`WS_*`·`ADMIN_*` 설정을 제거해 검사 조건을 고정합니다. 실행별 argv·exit·owned PID는 출력 경로의 `runner-checks.json` 또는 `runner-mixed-native.json`에 남습니다. 각 단계에는 deadline이 있으며 finally에서 자신이 시작한 process만 종료하고 wait합니다. Godot SCRIPT ERROR/engine ERROR와 nonzero exit는 실패입니다. GUI·socket 실행이 제한된 환경에서는 해당 실행 권한이 필요합니다.
+기본 runner는 import와 아래 8개 suite를 실행합니다. 임시 localhost port를 골라 `GAME_IDS=default` 서버를 build/start하고, namespace integration에는 별도 `GAME_IDS=game-a,game-b` 서버를 사용합니다. 상속받은 `ROOM_*`·`WS_*`·`ADMIN_*` 설정을 제거해 검사 조건을 고정합니다. 실행별 argv·exit·owned PID는 출력 경로의 `runner-checks.json` 또는 `runner-mixed-native.json`에 남습니다. 각 단계에는 deadline이 있으며 finally에서 자신이 시작한 process만 종료하고 wait합니다. Godot SCRIPT ERROR/engine ERROR와 nonzero exit는 실패입니다. GUI·socket 실행이 제한된 환경에서는 해당 실행 권한이 필요합니다.
 
-| 구분 | 관측한 범위 |
-|---|---|
-| 최종 수정 전 기본 assembled 실행 | import, unit **354 checks / 0 failures**, 실제 wire **62 / 0**, `WS_READ_TIMEOUT=3s`·heartbeat 1초로 6초 유지 **5 / 0** |
-| 별도 3D native | 두 실제 native 창, host **21 / 0**·peer **18 / 0**, 공통 full capture 16개 |
-| 별도 mixed native | 두 실제 native 창 + 네 headless, 독립 guest 6개. host **48 / 0**, peer **66 / 0**, headless 각각 **32 / 0**, 공통 PLAYING full capture **85개** |
-| 긴 game ID HUD | 7/48/64자 × 3D/2D × 두 창 크기 unit/geometry, native 한 창 fixture PNG. 후속 headless synthetic hover에서 visible popup 1개와 전체 tooltip 문자열 확인. 사람의 native hover 관측은 아님 |
-| 별도 namespace adapter | 최초 unit **58**·실제 Godot socket 4개 **89**. 최종 수정에서 namespace unit **58 / 0** 재확인 |
-| 최종 수정 covering | 입력·lifecycle 회귀 **77 / 0**, 기존 변경 영역 unit **260 / 0**. 단일 실제 WebSocketPeer와 controlled 응답 peer로 거절/timeout 후 seq1~7 복구. 실제 Go queue 포화 재현은 아님 |
+연결·지표 개선 소스는 [`e5fa8b3`](https://github.com/sangjinsu/coopdock/commit/e5fa8b38d6a8b25090849cbc79c50561421a89a8)입니다. 그 최종 파일과 동일한 소스에서 확인한 기본 runner 결과는 다음과 같습니다. 실제 엔진은 macOS arm64의 Godot **4.7.2**입니다.
+
+| 기본 suite | Checks / failures | 확인한 내용 |
+|---|---|---|
+| Unit | 366 / 0 | codec·state·보간·3D/2D·기존 UI 경계 |
+| 입력/lifecycle | 77 / 0 | 입력 재시도·정지 우선·같은 연결의 seq 연속성 |
+| Native 입력 helper | 9 / 0 | 실제 렌더 시험 helper의 정지 barrier 처리 |
+| 동기화 상태 | 86 / 0 | 최초 목록·연결 종료 안내·RTT·snapshot age·scope reset·HUD |
+| Namespace unit | 58 / 0 | 게임 선택·응답 소속 검사 |
+| 실제 wire | 62 / 0 | 실제 서버 룸 입장과 입력·상태 |
+| Namespace integration | 89 / 0 | 실제 4개 WebSocketPeer의 두 게임 이동·입장·퇴장 격리 |
+| 짧은 timeout heartbeat | 5 / 0 | `WS_READ_TIMEOUT=3s`·heartbeat 1초에서 연결 유지 |
+| **합계** | **752 / 0** | build·import와 모든 suite exit 0, 소유 child 13개 종료·회수 |
+
+별도 mixed native 실행은 **3D host와 2D peer의 실제 두 창 + 네 headless guest**, 총 독립 연결 6개입니다. host **48 / 0**, peer **66 / 0**, headless 각각 **32 / 0**, 합계 **242 / 0**을 확인했습니다. 전원 공통 PLAYING full capture **94개**의 내용이 모두 일치했고, 소유 child 8개가 모두 exit 0으로 종료·회수되었습니다.
 
 공통 full-state 비교는 같은 `(game_id,room_id,match_id,revision,server_tick,snapshot_seq)` 전체 snapshot deep equality입니다. mixed 검사는 hidden Y=2.5 보존, 2D Q/E 비활성, mode 전환 zero ACK와 `input_seq` 연속성을 포함합니다. native 입력은 synthetic physical key와 explicit focus signal이며 **OS 수동 keyboard/focus 시험은 아닙니다**. namespace의 같은 번호 공존은 deterministic core 시험 근거이며 실제 네 socket이 고정 같은 번호를 입증한 것은 아닙니다.
 
-최종 수정은 InputController·CoopClient·Lobby·Main을 변경했습니다. 따라서 예전 namespace 네 GD 파일이 모두 동일하다는 근거를 더는 적용하지 않습니다. 과거 실제 4-socket/6-socket/native 기록은 당시 소스의 통합 근거로 보존하고, 변경된 요청 완료·입력·UI 경계는 위 focused units와 controlled wire/hover로 연결합니다. wire/260-unit/hover 실행 뒤 추가한 유일한 production 변경은 `REQUEST_TIMEOUT` transient 분류이며 최종 77-check에서 검사했습니다. 최종 수정 후 기본 assembled 전체나 mixed/native 전체를 다시 실행했다는 뜻은 아닙니다. 기본 runner가 이 모든 suite나 Go full/race를 실행하는 것은 아닙니다. Go 검사 명령은 [서버 검증](../../docs/server-guide.md#종료와-검증)을 참조하세요.
+초기 mixed 실행에서는 기존 native 시험 helper의 2D 전환·정지 barrier 경합으로 timeout이 발생했습니다. 실패 원본을 보존하고 시험 helper의 입력 순서를 고친 뒤, 위의 helper 회귀와 최종 mixed 전체를 다시 실행했습니다. 이번 개선의 production 변경은 CoopClient·Lobby·Main이며 기존 InputController는 유지했습니다.
+
+동기화 상태의 작은 창 회귀는 700px에서 지표·긴 game ID tooltip·상단 조작 영역을 검사합니다. 제어한 응답 peer의 timeout·거절 회귀는 실제 Go queue 포화 재현이 아니며 native 입력도 OS 수동 조작 시험이 아닙니다. 과거 실행 기록을 이번 최종 소스의 통과 횟수에 합산하지 않습니다. 기본 runner가 Go test·race·vet·build 전체를 실행하는 것은 아니며 해당 명령은 [서버 검증](../../docs/server-guide.md#종료와-검증)을 따릅니다.
 
 web export·TLS 배포·production 부하/수용 규모·목표 Hz 달성·Godot 4.4 runtime·실제 OS keyboard/focus는 검증 범위 밖입니다. [검증 계획](../../docs/specs/08-validation.md)은 향후 게임 규칙·성능 시험까지 포함하므로 현재 실행 결과와 구분하세요.

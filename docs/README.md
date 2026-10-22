@@ -14,6 +14,7 @@
 | [Docker로 실행](docker.md) | 공개 GHCR 이미지, Compose 실행, 설정과 이미지 업데이트 |
 | [Go embedding 가이드](go-embedding.md) | public import, 기존 HTTP route 공존, 설정·admin·종료 |
 | [서버 사용·운영 가이드](server-guide.md) | 현재 룸·이동 계약, WebSocket JSON, 오류 코드, 모든 환경변수, 종료와 검증 |
+| [동기화 부하 테스트](load-testing.md) | 여러 룸 동시 이동, 1·10·50룸 실측과 공개 JSON, 해석 범위 |
 | [현재 서버 구조](architecture.md) | 게임 처리와 cache 기반 운영 조회의 내부 경로 |
 | [Godot 3D/2D 예제](../examples/godot/README.md) | desktop 실행, 게임 ID·private 입장, 입력·보간과 검증 한계 |
 
@@ -52,6 +53,7 @@
 | [운영 대시보드 구현 계획](implementation/operations-dashboard-plan.md) | room summary·collector·인증된 조회 API·운영 화면 구현 |
 | [게임별 룸 분리 설계](implementation/game-isolation-design.md) | 연결 게임 선택·게임별 번호·운영 필터·전역 자원 경계 |
 | [Godot client 설계](implementation/godot-client-design.md) / [구현 계획](implementation/godot-client-plan.md) | transport·lobby·공통 입력·3D/2D 표시와 검증 계약 |
+| [부하 테스트·Godot 개선 설계](implementation/sync-loadtest-and-godot-design.md) / [구현 계획](implementation/sync-loadtest-and-godot-plan.md) | 동시 룸 측정·상태 일치 검사·연결 안내와 동기화 HUD |
 
 실행 계획은 작업 당시 기준 commit, 선택한 계약, 작업 단계와 완료 기록을 보존합니다.
 계획의 과거 범위나 로컬 검증 환경을 현재 배포 상태로 해석하지 마세요.
