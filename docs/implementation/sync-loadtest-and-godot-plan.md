@@ -94,7 +94,7 @@ Godot의 기존 data-frame heartbeat를 유지하고 옛 operation epoch의 응�
 - [x] **Step 4: 가이드를 작성한다.** CLI 준비·한 번 실행·게임별 분배·보고서 읽기·재현 조건·실측 표를 적는다. localhost는 인터넷·화면 지연·최대 수용 인원·지연/손실 주입·게임별 성능 격리의 보장이 아님을 명시한다.
 - [x] **Step 5: Godot 사용·검증 기록을 갱신한다.** 연결 후 목록과 끊김 안내·지표 의미를 설명하고 새 assembled/mixed 결과를 과거 실행과 구분한다. 지원 최소 API 4.4와 실제 검증 엔진 4.7.2를 혼동하지 않는다.
 - [x] **Step 6: 최종 문서·소스 검증.** 링크·명령·지표 field를 실제 구현과 대조하고 `git diff --check` 및 변경에 필요한 fresh checks를 확인한다. task-owned process/socket이 남지 않았는지 검사한다.
-- [ ] **Step 7: 최종 Architect 검토·커밋·푸시.** exact diff·실측 원본·Godot 결과를 독립 검토한 뒤 `docs: publish sync load results and Godot guide`로 커밋·푸시한다. remote SHA와 해당 GitHub CI 결과를 확인하고 검증한 범위만 보고한다.
+- [x] **Step 7: 최종 Architect 검토·커밋·푸시.** exact diff·실측 원본·Godot 결과를 독립 검토한 뒤 `docs: publish sync load results and Godot guide`로 커밋·푸시한다. remote SHA와 해당 GitHub CI 결과를 확인하고 검증한 범위만 보고한다.
 
 ## 실행 증거와 완료 기준
 
@@ -106,4 +106,4 @@ root는 `work/sync-loadtest/`에 단계별 argv·exit·소유 process·원본 re
 
 - Task 1: [`425c173`](https://github.com/sangjinsu/coopdock/commit/425c173fe0a29caab0b08cf5befad93c49b55431), `feat: add concurrent synchronization load tests`. 정확한 소유 9파일의 최종 Architect 승인 뒤 `main`에 커밋·푸시했다. Go test·race 13개 package, vet·build를 통과했고 2게임·2룸·12명 실제 smoke에서 입력 240개/ACK 240개, 공통 capture 룸당 15개, 전원 이동·정지와 룸·연결·reader 정리를 확인했다. 검토에서 찾은 목록 잘림·배열 순서·미래/역행 처리 seq의 잘못된 성공은 실제 동작 RED 후 수정했다.
 - Task 2: [`e5fa8b3`](https://github.com/sangjinsu/coopdock/commit/e5fa8b38d6a8b25090849cbc79c50561421a89a8), `feat: improve Godot connection and sync feedback`. 정확한 소유 9파일의 최종 Architect 승인 뒤 `main`에 커밋·푸시했다. Godot assembled 8 suite는 752 checks/0 failures, child 13개 종료·회수다. 독립 mixed 3D/2D 두 native+네 headless는 242/0, 전원 공통 full capture 94개, child 8개 전부 exit 0·회수다. 최초 native helper의 정지 barrier 실패 기록은 보존하고 helper 회귀 9/0과 수정 후 전체 재실행으로 확인했다.
-- Task 3: 소스 `425c173`의 일반 build에서 1·10·50룸 × 6명 × 20초 × 20Hz를 매번 새 서버로 순차 실행했다. 입력/ACK는 2,400·24,000·120,000개이며 전원 이동·정지·모든 룸 제거·연결/reader 정리를 확인했다. 환경·실제 조건·원본 SHA와 61개 룸 report는 [공개 JSON](../validation/sync-load-results.json), 통계 해석과 재현 절차는 [가이드](../load-testing.md)에 보존한다. 소스 CI `39873910696`는 성공이며, 최종 문서의 Architect 검토·커밋·푸시·그 CI는 이 기록 시점에 대기 중이다.
+- Task 3: 소스 `425c173`의 일반 build에서 1·10·50룸 × 6명 × 20초 × 20Hz를 매번 새 서버로 순차 실행했다. 입력/ACK는 2,400·24,000·120,000개이며 전원 이동·정지·모든 룸 제거·연결/reader 정리를 확인했다. 환경·실제 조건·원본 SHA와 61개 룸 report는 [공개 JSON](../validation/sync-load-results.json), 통계 해석과 재현 절차는 [가이드](../load-testing.md)에 보존한다. 소스 CI `39873910696`는 성공했다. 최종 문서 7파일은 Architect APPROVED를 받고 [`4645971`](https://github.com/sangjinsu/coopdock/commit/464597136e8d46441f5f10d28c8f0e99949ed72b)로 `main`에 커밋·푸시했으며, [해당 CI `39875363606`](https://github.com/sangjinsu/coopdock/actions/runs/39875363606)의 Go stable·Go 1.26.x·Publish container image가 모두 성공했다. 이 완료 기록은 해당 문서 커밋과 CI의 결과이며, 상태 표시만 갱신하는 후속 커밋의 CI는 별도로 확인한다.
